@@ -1,0 +1,23 @@
+# Scripted "attention" sequence for a rehearsed/backup demo run.
+# Each step sets the simulator's attended frequency for duration_sec.
+# freq_hz: null means idle (noise only, no target attended).
+#
+# This walks through: pick "Energetic" mood -> playlist starts -> transport
+# layer -> Next -> Play/Pause -> back to Mood layer.
+steps:
+  - freq_hz: null
+    duration_sec: 2.0
+  - freq_hz: 10.0       # Mood layer: Energetic
+    duration_sec: 3.0
+  - freq_hz: null
+    duration_sec: 1.5
+  - freq_hz: 8.571428571428571  # Transport layer: Next
+    duration_sec: 3.0
+  - freq_hz: null
+    duration_sec: 1.5
+  - freq_hz: 7.5        # Transport layer: Play/Pause
+    duration_sec: 3.0
+  - freq_hz: null
+    duration_sec: 1.5
+  - freq_hz: 12.0       # Transport layer: Back to Mood
+    duration_sec: 3.0
