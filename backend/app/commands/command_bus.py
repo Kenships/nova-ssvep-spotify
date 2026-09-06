@@ -31,11 +31,20 @@ class CommandBus:
         self._pending_label = None
         self._pending_since = None
 
-    def switch_layer(self, layer: Layer, now: float | None = None) -> None:
+    def enter_refractory(self, now: float | None = None) -> None:
+        """Reset dwell and block the next `refractory_sec` worth of feed()
+        calls from firing. Used both by switch_layer (below) and by a
+        manually-triggered command (see main.py's /api/manual-command) so a
+        manual click can't be immediately followed by a stale/coincidental
+        automatic re-fire of the same target.
+        """
         now = now if now is not None else time.monotonic()
-        self.layer = layer
         self.reset_dwell()
         self._refractory_until = now + self.refractory_sec
+
+    def switch_layer(self, layer: Layer, now: float | None = None) -> None:
+        self.layer = layer
+        self.enter_refractory(now)
 
     def feed(self, label: str | None, now: float | None = None) -> str | None:
         """Feed one detector output (label or None). Returns a fired command

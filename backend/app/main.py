@@ -14,9 +14,10 @@ import asyncio
 import logging
 import time
 
-from fastapi import FastAPI, WebSocket
+from fastapi import FastAPI, HTTPException, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, RedirectResponse
+from pydantic import BaseModel
 
 from .commands.command_bus import CommandBus, Layer
 from .config import settings
@@ -142,6 +143,34 @@ async def _handle_fired_command(label: str) -> None:
         _apply_spotify_side_effect(layer, label)
     except Exception:
         logger.exception("Spotify call failed for fired command %s (layer=%s)", label, layer.value)
+
+
+class ManualCommandRequest(BaseModel):
+    target: str
+
+
+@app.post("/api/manual-command")
+async def manual_command(req: ManualCommandRequest):
+    """Lets the frontend fire a command by direct click/keyboard, bypassing
+    SSVEP detection entirely. Tiles must always be manually operable --
+    for testing without hardware, for a demo when signal quality is poor,
+    and as an accessibility fallback for whoever hasn't lost all voluntary
+    movement yet. Reuses _handle_fired_command so a manual click produces
+    exactly the same broadcast + layer-switch + Spotify side effect as a
+    real detection would.
+    """
+    valid_targets = set(_current_candidate_freqs().keys())
+    if req.target not in valid_targets:
+        raise HTTPException(
+            status_code=400,
+            detail=f"'{req.target}' is not valid for the current layer ({command_bus.layer.value}); expected one of {sorted(valid_targets)}",
+        )
+
+    await _handle_fired_command(req.target)
+    # Block the automatic detector from immediately re-firing the same
+    # target right after a manual override.
+    command_bus.enter_refractory(time.monotonic())
+    return {"layer": command_bus.layer.value, "target": req.target}
 
 
 async def _detection_loop() -> None:
