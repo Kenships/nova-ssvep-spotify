@@ -83,9 +83,17 @@ class SpotifyClient:
             )
         return devices[0]["id"]
 
-    def play_playlist(self, playlist_uri: str) -> None:
+    def play_playlist(self, uri: str) -> None:
+        # Spotify's API distinguishes a "context" (playlist/album/artist,
+        # passed as context_uri) from an individual track (must go in the
+        # `uris` list) -- passing a track URI as context_uri 400s with
+        # "Non supported context uri". mood_playlists.json is meant to hold
+        # playlist URIs, but accept a track URI too rather than crash.
         device_id = self._resolve_device_id()
-        self.client.start_playback(device_id=device_id, context_uri=playlist_uri)
+        if ":track:" in uri:
+            self.client.start_playback(device_id=device_id, uris=[uri])
+        else:
+            self.client.start_playback(device_id=device_id, context_uri=uri)
 
     def pause(self) -> None:
         self.client.pause_playback()
