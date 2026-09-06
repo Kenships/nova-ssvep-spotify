@@ -58,6 +58,74 @@ body {
 .app__ws-status--connecting { background: #FFD54F33; color: #FFD54F; }
 .app__ws-status--disconnected { background: #FF704333; color: #FF7043; }
 
+.settings-menu {
+  position: relative;
+}
+.settings-menu__trigger {
+  background: #26282f;
+  color: #e8e8e8;
+  border: none;
+  border-radius: 999px;
+  width: 2.1rem;
+  height: 2.1rem;
+  font-size: 1.1rem;
+  cursor: pointer;
+  line-height: 1;
+}
+.settings-menu__trigger:hover {
+  background: #33353d;
+}
+.settings-menu__panel {
+  position: absolute;
+  top: calc(100% + 0.5rem);
+  right: 0;
+  width: 20rem;
+  background: #1c1e24;
+  border: 1px solid #33353d;
+  border-radius: 10px;
+  padding: 0.75rem;
+  z-index: 10;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+}
+.settings-menu__title {
+  font-weight: 600;
+  font-size: 0.85rem;
+  color: #aaa;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  margin-bottom: 0.5rem;
+}
+.settings-menu__option {
+  display: flex;
+  gap: 0.6rem;
+  align-items: flex-start;
+  padding: 0.4rem 0.2rem;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.settings-menu__option:hover {
+  background: #26282f;
+}
+.settings-menu__option input {
+  margin-top: 0.25rem;
+}
+.settings-menu__option-label {
+  font-size: 0.9rem;
+  font-weight: 500;
+}
+.settings-menu__option-desc {
+  font-size: 0.75rem;
+  color: #999;
+  line-height: 1.3;
+}
+.settings-menu__footnote {
+  margin-top: 0.5rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid #33353d;
+  font-size: 0.75rem;
+  color: #777;
+}
+
 .app__stage {
   flex: 1;
   min-height: 0;

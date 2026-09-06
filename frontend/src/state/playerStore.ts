@@ -1,7 +1,22 @@
 import { create } from "zustand";
+import type { FlickerMode } from "../ssvep/flickerModes";
 
 export type Layer = "mood" | "transport";
 export type WsStatus = "connecting" | "connected" | "disconnected";
+
+const FLICKER_MODE_STORAGE_KEY = "ssvep-flicker-mode";
+
+function loadStoredFlickerMode(): FlickerMode {
+  try {
+    const stored = localStorage.getItem(FLICKER_MODE_STORAGE_KEY);
+    if (stored === "sine" || stored === "rings" || stored === "checkerboard" || stored === "gabor" || stored === "off") {
+      return stored;
+    }
+  } catch {
+    // localStorage unavailable (private browsing, etc.) -- fall through to default.
+  }
+  return "sine";
+}
 
 interface NowPlaying {
   track: string;
@@ -19,6 +34,7 @@ interface PlayerState {
   detectionConfidence: number;
   nowPlaying: NowPlaying | null;
   measuredRefreshHz: number | null;
+  flickerMode: FlickerMode;
 
   setLayer: (layer: Layer) => void;
   setCurrentMood: (moodId: string) => void;
@@ -27,6 +43,7 @@ interface PlayerState {
   setDetection: (label: string | null, confidence: number) => void;
   setNowPlaying: (np: NowPlaying | null) => void;
   setMeasuredRefreshHz: (hz: number) => void;
+  setFlickerMode: (mode: FlickerMode) => void;
 }
 
 export const usePlayerStore = create<PlayerState>((set) => ({
@@ -38,6 +55,7 @@ export const usePlayerStore = create<PlayerState>((set) => ({
   detectionConfidence: 0,
   nowPlaying: null,
   measuredRefreshHz: null,
+  flickerMode: loadStoredFlickerMode(),
 
   setLayer: (layer) => set({ layer }),
   setCurrentMood: (moodId) => set({ currentMoodId: moodId }),
@@ -46,4 +64,12 @@ export const usePlayerStore = create<PlayerState>((set) => ({
   setDetection: (label, confidence) => set({ detectedLabel: label, detectionConfidence: confidence }),
   setNowPlaying: (np) => set({ nowPlaying: np }),
   setMeasuredRefreshHz: (hz) => set({ measuredRefreshHz: hz }),
+  setFlickerMode: (mode) => {
+    try {
+      localStorage.setItem(FLICKER_MODE_STORAGE_KEY, mode);
+    } catch {
+      // Best-effort persistence only -- a per-viewer convenience, not load-bearing.
+    }
+    set({ flickerMode: mode });
+  },
 }));

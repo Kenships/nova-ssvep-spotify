@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { FlickerCanvas } from "../ssvep/FlickerCanvas";
 import { MOOD_TILES } from "../ssvep/frequencies";
+import { usePlayerStore } from "../state/playerStore";
 
 const CUE_DURATION_SEC = 8;
 
@@ -19,6 +20,7 @@ interface CalibrationScreenProps {
 export function CalibrationScreen({ onDone }: CalibrationScreenProps) {
   const [stepIndex, setStepIndex] = useState(0);
   const [secondsLeft, setSecondsLeft] = useState(CUE_DURATION_SEC);
+  const flickerMode = usePlayerStore((s) => s.flickerMode);
 
   const currentTile = MOOD_TILES[stepIndex];
 
@@ -48,7 +50,7 @@ export function CalibrationScreen({ onDone }: CalibrationScreenProps) {
         Look at the flashing <strong>{currentTile.label}</strong> tile ({secondsLeft}s)
       </div>
       <div className="calibration-screen__stage">
-        <FlickerCanvas tiles={[currentTile]} highlightedTileId={null} />
+        <FlickerCanvas tiles={[currentTile]} highlightedTileId={null} mode={flickerMode} />
       </div>
       <div className="calibration-screen__progress">
         {stepIndex + 1} / {MOOD_TILES.length}

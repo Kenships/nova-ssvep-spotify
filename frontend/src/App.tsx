@@ -2,6 +2,7 @@ import { useCallback, useState } from "react";
 import { CalibrationScreen } from "./calibration/CalibrationScreen";
 import { MoodLayer } from "./layers/MoodLayer";
 import { TransportLayer } from "./layers/TransportLayer";
+import { SettingsMenu } from "./settings/SettingsMenu";
 import { NowPlayingPanel } from "./spotify/nowPlayingPanel";
 import { usePlayerStore } from "./state/playerStore";
 import { useCommandSocket } from "./ws/useCommandSocket";
@@ -18,6 +19,7 @@ export function App() {
   const detectedLabel = usePlayerStore((s) => s.detectedLabel);
   const detectionConfidence = usePlayerStore((s) => s.detectionConfidence);
   const lastFiredTileId = usePlayerStore((s) => s.lastFiredTileId);
+  const flickerMode = usePlayerStore((s) => s.flickerMode);
 
   useCommandSocket(
     useCallback(
@@ -34,6 +36,26 @@ export function App() {
     ),
   );
 
+  // Tiles are always clickable, regardless of flicker mode or SSVEP signal
+  // quality: routes through the same backend command_bus / Spotify path a
+  // real detection would, so behavior is identical either way. The
+  // resulting "command" broadcast (via useCommandSocket above) is what
+  // actually updates local state -- this call doesn't touch state itself.
+  const handleTileActivate = useCallback(async (tileId: string) => {
+    try {
+      const res = await fetch("/api/manual-command", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ target: tileId }),
+      });
+      if (!res.ok) {
+        console.error("Manual command rejected:", await res.text());
+      }
+    } catch (err) {
+      console.error("Manual command failed:", err);
+    }
+  }, []);
+
   if (screen === "calibration") {
     return <CalibrationScreen onDone={() => setScreen("player")} />;
   }
@@ -46,14 +68,15 @@ export function App() {
         <button className="app__calibrate-btn" onClick={() => setScreen("calibration")}>
           Run Calibration
         </button>
+        <SettingsMenu />
         <div className={`app__ws-status app__ws-status--${wsStatus}`}>{wsStatus}</div>
       </header>
 
       <main className="app__stage">
         {layer === "mood" ? (
-          <MoodLayer highlightedTileId={lastFiredTileId} />
+          <MoodLayer highlightedTileId={lastFiredTileId} mode={flickerMode} onTileActivate={handleTileActivate} />
         ) : (
-          <TransportLayer highlightedTileId={lastFiredTileId} />
+          <TransportLayer highlightedTileId={lastFiredTileId} mode={flickerMode} onTileActivate={handleTileActivate} />
         )}
       </main>
 
