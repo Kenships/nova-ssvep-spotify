@@ -19,6 +19,7 @@ interface FlickerCanvasProps {
 const REFRESH_MEASURE_FRAMES = 60;
 const BACKGROUND = "#111318";
 const PULSE_DURATION_MS = 550;
+const CORNER_RADIUS_CSS_PX = 16;
 type PulseStatus = "pending" | "ok" | "failed";
 interface ClickPulse {
   start: number;
@@ -164,14 +165,25 @@ export function FlickerCanvas({
       // Pattern-reversal: which cells are "on" flips at the target
       // frequency, but roughly half the tile is always lit -- mean
       // luminance stays constant, unlike color<->black flicker.
+      //
+      // Cols/rows are picked so cellW*cols and cellH*rows land exactly on w
+      // and h -- a fixed pixel cell size stepped from the tile's corner
+      // leaves a leftover partial strip on the bottom/right edge whenever
+      // w/h isn't an exact multiple of it, which reads as off-center
+      // (worse once tiles stopped being uniform grid cells -- see the
+      // media-player transport layout).
       const phase = Math.sin(2 * Math.PI * tile.freqHz * t) >= 0;
-      const checkSize = Math.max(Math.min(w, h) / 6, 4);
-      for (let cy = 0; cy < h; cy += checkSize) {
-        for (let cx = 0; cx < w; cx += checkSize) {
-          const evenCell = (Math.floor((x + cx) / checkSize) + Math.floor((y + cy) / checkSize)) % 2 === 0;
+      const targetCellSize = Math.max(Math.min(w, h) / 6, 4);
+      const cols = Math.max(1, Math.round(w / targetCellSize));
+      const rows = Math.max(1, Math.round(h / targetCellSize));
+      const cellW = w / cols;
+      const cellH = h / rows;
+      for (let row = 0; row < rows; row++) {
+        for (let col = 0; col < cols; col++) {
+          const evenCell = (row + col) % 2 === 0;
           const lit = phase ? evenCell : !evenCell;
           ctx.fillStyle = lit ? tile.color : BACKGROUND;
-          ctx.fillRect(x + cx, y + cy, checkSize, checkSize);
+          ctx.fillRect(x + col * cellW, y + row * cellH, cellW, cellH);
         }
       }
     };
@@ -223,7 +235,20 @@ export function FlickerCanvas({
 
       tiles.forEach((tile, i) => {
         const { x, y, w, h } = tileRects[i];
+        // Fixed CSS-pixel radius (scaled to device pixels), not proportional
+        // to tile size -- real UI corner radii stay constant regardless of
+        // how big the element is. Capped at half the smaller side so a
+        // short strip like the "Back to Playlists" footer doesn't turn
+        // into an unintended full pill/stadium shape.
+        const radius = Math.min(CORNER_RADIUS_CSS_PX * dpr, Math.min(w, h) / 2);
 
+        // Rounded corners for a modern look: clip to a rounded rect before
+        // any stimulus mode draws, so sine/rings/checkerboard/gabor all
+        // respect the shape without each needing its own rounding logic.
+        ctx.save();
+        ctx.beginPath();
+        ctx.roundRect(x, y, w, h, radius);
+        ctx.clip();
         switch (mode) {
           case "sine":
             drawSine(ctx, tile, x, y, w, h, elapsedSec);
@@ -241,11 +266,14 @@ export function FlickerCanvas({
             drawOff(ctx, tile, x, y, w, h);
             break;
         }
+        ctx.restore();
 
         if (tile.id === highlightedTileId) {
+          ctx.beginPath();
+          ctx.roundRect(x, y, w, h, radius);
           ctx.strokeStyle = "#ffffff";
           ctx.lineWidth = Math.max(4, w * 0.02);
-          ctx.strokeRect(x, y, w, h);
+          ctx.stroke();
         }
 
         // Legible label regardless of the mode's instantaneous pixel colors
@@ -285,7 +313,15 @@ export function FlickerCanvas({
             const inset = Math.min(w, h) * 0.04 * progress;
             ctx.strokeStyle = `rgba(${color}, ${alpha})`;
             ctx.lineWidth = Math.max(6, w * 0.035) * (1 - progress * 0.5);
-            ctx.strokeRect(x + inset, y + inset, w - inset * 2, h - inset * 2);
+            ctx.beginPath();
+            ctx.roundRect(
+              x + inset,
+              y + inset,
+              w - inset * 2,
+              h - inset * 2,
+              Math.max(radius - inset, 0),
+            );
+            ctx.stroke();
           }
         }
       });
