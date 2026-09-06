@@ -5,7 +5,7 @@ import { MOOD_TILES } from "../ssvep/frequencies";
 interface MoodLayerProps {
   highlightedTileId: string | null;
   mode: FlickerMode;
-  onTileActivate: (tileId: string) => void;
+  onTileActivate: (tileId: string) => Promise<boolean>;
 }
 
 export function MoodLayer({ highlightedTileId, mode, onTileActivate }: MoodLayerProps) {

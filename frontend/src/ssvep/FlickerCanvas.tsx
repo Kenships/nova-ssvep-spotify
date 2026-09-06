@@ -9,12 +9,21 @@ interface FlickerCanvasProps {
   onRefreshRateMeasured?: (hz: number) => void;
   /** Tiles must always be clickable, regardless of flicker mode -- for
    * testing without hardware, low-signal fallback during a demo, and as an
-   * accessibility path for anyone who hasn't lost all voluntary movement. */
-  onTileActivate?: (tileId: string) => void;
+   * accessibility path for anyone who hasn't lost all voluntary movement.
+   * Resolve true/false so the click gets an immediate, visible outcome --
+   * a click that silently no-ops (e.g. rejected by the backend) must not
+   * look identical to one that worked. */
+  onTileActivate?: (tileId: string) => Promise<boolean>;
 }
 
 const REFRESH_MEASURE_FRAMES = 60;
 const BACKGROUND = "#111318";
+const PULSE_DURATION_MS = 550;
+type PulseStatus = "pending" | "ok" | "failed";
+interface ClickPulse {
+  start: number;
+  status: PulseStatus;
+}
 
 function hexToRgb(hex: string): [number, number, number] {
   const clean = hex.replace("#", "");
@@ -57,6 +66,12 @@ export function FlickerCanvas({
 }: FlickerCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const rafRef = useRef<number>(0);
+  // Lives outside the effect below so a click's feedback survives the
+  // effect re-running (which happens on every highlightedTileId change --
+  // i.e. often, since automatic detections update it independently of any
+  // click). A plain `const pulses = new Map()` declared inside the effect
+  // would get silently reset mid-animation.
+  const pulsesRef = useRef<Map<string, ClickPulse>>(new Map());
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -217,6 +232,28 @@ export function FlickerCanvas({
         ctx.textAlign = "center";
         ctx.textBaseline = "middle";
         ctx.fillText(tile.label, x + w / 2, y + h / 2);
+
+        // Immediate click feedback: an expanding, fading ring drawn on top
+        // of everything else, independent of any backend round-trip --
+        // white while the request is in flight, green/red once it
+        // resolves. This is what makes a click feel like it *did
+        // something* the instant it happens, rather than waiting on a
+        // network response (or silently doing nothing if one is rejected).
+        const pulse = pulsesRef.current.get(tile.id);
+        if (pulse) {
+          const age = timestamp - pulse.start;
+          if (age > PULSE_DURATION_MS) {
+            pulsesRef.current.delete(tile.id);
+          } else {
+            const progress = age / PULSE_DURATION_MS;
+            const color = pulse.status === "failed" ? "255, 82, 82" : pulse.status === "ok" ? "76, 217, 100" : "255, 255, 255";
+            const alpha = pulse.status === "pending" ? 0.7 : 0.7 * (1 - progress);
+            const inset = Math.min(w, h) * 0.04 * progress;
+            ctx.strokeStyle = `rgba(${color}, ${alpha})`;
+            ctx.lineWidth = Math.max(6, w * 0.035) * (1 - progress * 0.5);
+            ctx.strokeRect(x + inset, y + inset, w - inset * 2, h - inset * 2);
+          }
+        }
       });
 
       rafRef.current = requestAnimationFrame(draw);
@@ -234,7 +271,16 @@ export function FlickerCanvas({
       const row = Math.floor(clickY / (rect.height / rows));
       const index = row * cols + col;
       const tile = tiles[index];
-      if (tile) onTileActivate(tile.id);
+      if (!tile) return;
+
+      pulsesRef.current.set(tile.id, { start: performance.now(), status: "pending" });
+      onTileActivate(tile.id).then((ok) => {
+        const pulse = pulsesRef.current.get(tile.id);
+        if (pulse && pulse.status === "pending") {
+          pulse.status = ok ? "ok" : "failed";
+          pulse.start = performance.now(); // restart the fade from resolution, not from click time
+        }
+      });
     };
     canvas.addEventListener("click", handleClick);
 

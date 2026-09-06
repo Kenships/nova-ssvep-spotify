@@ -158,12 +158,28 @@ async def manual_command(req: ManualCommandRequest):
     movement yet. Reuses _handle_fired_command so a manual click produces
     exactly the same broadcast + layer-switch + Spotify side effect as a
     real detection would.
+
+    Validates against BOTH mood and transport target sets (mood/transport
+    ids are disjoint, so this is unambiguous) rather than only whichever
+    layer command_bus currently thinks it's in. The automatic detector can
+    flip command_bus.layer between when the user sees a tile and when their
+    click actually lands on the backend (confirmed happening in practice --
+    the confidence threshold sits close enough to the noise floor that idle
+    noise alone triggers real layer switches), so a manual click must be
+    layer-agnostic: fire whatever the user actually clicked, and bring
+    command_bus's layer in line with that rather than reject the click for
+    having "the wrong layer" from the user's point of view.
     """
-    valid_targets = set(_current_candidate_freqs().keys())
-    if req.target not in valid_targets:
+    mood_ids = set(frequency_map(load_moods()).keys())
+    transport_ids = set(settings.transport_frequencies.keys())
+    if req.target in mood_ids:
+        command_bus.layer = Layer.MOOD
+    elif req.target in transport_ids:
+        command_bus.layer = Layer.TRANSPORT
+    else:
         raise HTTPException(
             status_code=400,
-            detail=f"'{req.target}' is not valid for the current layer ({command_bus.layer.value}); expected one of {sorted(valid_targets)}",
+            detail=f"'{req.target}' is not a valid mood or transport target; expected one of {sorted(mood_ids | transport_ids)}",
         )
 
     await _handle_fired_command(req.target)

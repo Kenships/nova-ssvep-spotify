@@ -5,7 +5,7 @@ import { TRANSPORT_TILES } from "../ssvep/frequencies";
 interface TransportLayerProps {
   highlightedTileId: string | null;
   mode: FlickerMode;
-  onTileActivate: (tileId: string) => void;
+  onTileActivate: (tileId: string) => Promise<boolean>;
 }
 
 export function TransportLayer({ highlightedTileId, mode, onTileActivate }: TransportLayerProps) {

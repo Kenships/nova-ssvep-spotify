@@ -41,7 +41,7 @@ export function App() {
   // real detection would, so behavior is identical either way. The
   // resulting "command" broadcast (via useCommandSocket above) is what
   // actually updates local state -- this call doesn't touch state itself.
-  const handleTileActivate = useCallback(async (tileId: string) => {
+  const handleTileActivate = useCallback(async (tileId: string): Promise<boolean> => {
     try {
       const res = await fetch("/api/manual-command", {
         method: "POST",
@@ -50,9 +50,12 @@ export function App() {
       });
       if (!res.ok) {
         console.error("Manual command rejected:", await res.text());
+        return false;
       }
+      return true;
     } catch (err) {
       console.error("Manual command failed:", err);
+      return false;
     }
   }, []);
 
