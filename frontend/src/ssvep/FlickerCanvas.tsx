@@ -34,10 +34,52 @@ function hexToRgb(hex: string): [number, number, number] {
   ];
 }
 
-function getGridDims(n: number) {
-  const cols = Math.ceil(Math.sqrt(n));
-  const rows = Math.ceil(n / cols);
-  return { cols, rows };
+interface PixelRect {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+/**
+ * Where each tile lands, in pixel space, for the given canvas size. Shared
+ * by the draw loop and the click hit-test so layout can never drift between
+ * "what's drawn" and "what's clickable".
+ *
+ * If every tile specifies an explicit `rect` (fractions of the canvas --
+ * see frequencies.ts), that layout is used as-is. Otherwise falls back to
+ * an automatic square-ish grid (used by the mood tiles, which don't need a
+ * specific arrangement).
+ */
+function computeTileRects(tiles: FreqTile[], width: number, height: number): PixelRect[] {
+  if (tiles.length > 0 && tiles.every((t) => t.rect)) {
+    const padding = Math.min(width, height) * 0.015;
+    return tiles.map((t) => {
+      const r = t.rect!;
+      return {
+        x: r.x * width + padding,
+        y: r.y * height + padding,
+        w: r.w * width - padding * 2,
+        h: r.h * height - padding * 2,
+      };
+    });
+  }
+
+  const cols = Math.ceil(Math.sqrt(tiles.length));
+  const rows = Math.ceil(tiles.length / cols);
+  const cellW = width / cols;
+  const cellH = height / rows;
+  const padding = Math.min(cellW, cellH) * 0.08;
+  return tiles.map((_, i) => {
+    const col = i % cols;
+    const row = Math.floor(i / cols);
+    return {
+      x: col * cellW + padding,
+      y: row * cellH + padding,
+      w: cellW - padding * 2,
+      h: cellH - padding * 2,
+    };
+  });
 }
 
 /**
@@ -177,18 +219,10 @@ export function FlickerCanvas({
       const height = canvas.height;
       ctx.clearRect(0, 0, width, height);
 
-      const { cols, rows } = getGridDims(tiles.length);
-      const cellW = width / cols;
-      const cellH = height / rows;
-      const padding = Math.min(cellW, cellH) * 0.08;
+      const tileRects = computeTileRects(tiles, width, height);
 
       tiles.forEach((tile, i) => {
-        const col = i % cols;
-        const row = Math.floor(i / cols);
-        const x = col * cellW + padding;
-        const y = row * cellH + padding;
-        const w = cellW - padding * 2;
-        const h = cellH - padding * 2;
+        const { x, y, w, h } = tileRects[i];
 
         switch (mode) {
           case "sine":
@@ -266,10 +300,10 @@ export function FlickerCanvas({
       const rect = canvas.getBoundingClientRect();
       const clickX = event.clientX - rect.left;
       const clickY = event.clientY - rect.top;
-      const { cols, rows } = getGridDims(tiles.length);
-      const col = Math.floor(clickX / (rect.width / cols));
-      const row = Math.floor(clickY / (rect.height / rows));
-      const index = row * cols + col;
+      const tileRects = computeTileRects(tiles, rect.width, rect.height);
+      const index = tileRects.findIndex(
+        (r) => clickX >= r.x && clickX <= r.x + r.w && clickY >= r.y && clickY <= r.y + r.h,
+      );
       const tile = tiles[index];
       if (!tile) return;
 
