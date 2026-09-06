@@ -1,0 +1,32 @@
+{
+  "moods": [
+    {
+      "id": "calm",
+      "label": "Calm",
+      "freqHz": 7.5,
+      "color": "#4FC3F7",
+      "spotify_playlist_uri": "spotify:playlist:REPLACE_WITH_PEACEFUL_PIANO_URI"
+    },
+    {
+      "id": "happy",
+      "label": "Happy",
+      "freqHz": 8.571428571428571,
+      "color": "#FFD54F",
+      "spotify_playlist_uri": "spotify:playlist:REPLACE_WITH_MOOD_BOOSTER_URI"
+    },
+    {
+      "id": "energetic",
+      "label": "Energetic",
+      "freqHz": 10.0,
+      "color": "#FF7043",
+      "spotify_playlist_uri": "spotify:playlist:REPLACE_WITH_BEAST_MODE_URI"
+    },
+    {
+      "id": "sad",
+      "label": "Sad",
+      "freqHz": 12.0,
+      "color": "#7986CB",
+      "spotify_playlist_uri": "spotify:playlist:REPLACE_WITH_SAD_SONGS_URI"
+    }
+  ]
+}
