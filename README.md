@@ -24,32 +24,50 @@ hardware-specific pieces.
 - `hardware/` — ant-neuro eego bring-up notes and checklist, filled in as
   investigation happens ahead of the one real-hardware day.
 - `docs/` — demo script.
+- `scripts/` — `run.bat` / `dev_up.ps1` (start everything) and
+  `dev_down.ps1` (stop everything).
 
 ## Running locally (simulated EEG, no hardware needed)
 
-**Backend:**
+**One command** (after the one-time backend venv setup below): double-click
+`scripts/run.bat`, or from a terminal:
+```
+powershell -ExecutionPolicy Bypass -File scripts/dev_up.ps1
+```
+Starts the simulator, backend, and frontend each in their own window,
+clears any stray processes left over from a previous run first, and opens
+http://localhost:5173 once the frontend is up. Pass `-DetectorBackend cca`
+to use the CCA detector instead of PSDA, or `-SimFreq 10.0` to have the
+simulator attend a fixed frequency from launch. Stop everything with:
+```
+powershell -ExecutionPolicy Bypass -File scripts/dev_down.ps1
+```
+
+**One-time backend setup** (dev_up.ps1 needs this to exist first):
 ```
 cd backend
 python -m venv .venv
 .venv\Scripts\pip install -r requirements.txt
 copy ..\.env.example .env   # then fill in Spotify credentials if testing that part
-.venv\Scripts\python -m uvicorn app.main:app --reload --port 8000
 ```
+(`dev_up.ps1` also runs `npm install` for the frontend automatically on
+first launch if `frontend/node_modules` is missing.)
 
-**Simulator** (separate terminal):
+**Running the three pieces by hand instead**, e.g. to watch one's logs in
+its own foreground terminal:
 ```
+# backend
+cd backend
+.venv\Scripts\python -m uvicorn app.main:app --reload --port 8000
+
+# simulator (separate terminal)
 backend\.venv\Scripts\python simulator\mock_eeg_lsl.py
 # press 1/2/3/4 to simulate attending Calm/Happy/Energetic/Sad, 0 for idle
-```
 
-**Frontend** (separate terminal):
-```
+# frontend (separate terminal)
 cd frontend
-npm install
 npm run dev
 ```
-Then open http://localhost:5173. Or run all three at once with
-`scripts/dev_up.ps1`.
 
 ## Running tests
 
