@@ -1,0 +1,120 @@
+* {
+  box-sizing: border-box;
+}
+
+html, body, #root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: #0b0c0f;
+  color: #e8e8e8;
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+.app {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.app__header {
+  display: flex;
+  align-items: center;
+  gap: 1.5rem;
+  padding: 0.75rem 1.5rem;
+  background: #16181d;
+  border-bottom: 1px solid #26282f;
+}
+
+.app__title {
+  font-weight: 700;
+  font-size: 1.1rem;
+  color: #1DB954;
+}
+
+.app__calibrate-btn {
+  margin-left: auto;
+  background: #26282f;
+  color: #e8e8e8;
+  border: none;
+  border-radius: 999px;
+  padding: 0.4rem 1rem;
+  cursor: pointer;
+}
+.app__calibrate-btn:hover {
+  background: #33353d;
+}
+
+.app__ws-status {
+  font-size: 0.8rem;
+  padding: 0.2rem 0.6rem;
+  border-radius: 999px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+.app__ws-status--connected { background: #1DB95433; color: #1DB954; }
+.app__ws-status--connecting { background: #FFD54F33; color: #FFD54F; }
+.app__ws-status--disconnected { background: #FF704333; color: #FF7043; }
+
+.app__stage {
+  flex: 1;
+  min-height: 0;
+}
+
+.app__debug {
+  padding: 0.4rem 1.5rem;
+  font-size: 0.75rem;
+  color: #888;
+  background: #16181d;
+  border-top: 1px solid #26282f;
+}
+
+.now-playing {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+.now-playing--empty {
+  color: #888;
+  font-size: 0.9rem;
+}
+.now-playing__art {
+  width: 32px;
+  height: 32px;
+  border-radius: 4px;
+}
+.now-playing__meta {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.2;
+}
+.now-playing__track {
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+.now-playing__artist {
+  font-size: 0.75rem;
+  color: #aaa;
+}
+
+.calibration-screen {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1rem;
+  background: #0b0c0f;
+}
+.calibration-screen__instructions {
+  font-size: 1.2rem;
+}
+.calibration-screen__stage {
+  width: 40vmin;
+  height: 40vmin;
+}
+.calibration-screen__progress {
+  color: #888;
+}
