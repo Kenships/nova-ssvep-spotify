@@ -5,28 +5,28 @@
       "label": "Calm",
       "freqHz": 7.5,
       "color": "#4FC3F7",
-      "spotify_playlist_uri": "spotify:playlist:5nKUgJKr1vVNV2zUe6zOxx"
+      "spotify_playlist_uri": "spotify:playlist:37i9dQZF1EIe7gYhF3NROX"
     },
     {
       "id": "happy",
       "label": "Happy",
       "freqHz": 8.571428571428571,
       "color": "#FFD54F",
-      "spotify_playlist_uri": "spotify:playlist:5Q6REFoDkWgKcuj3h0A97l"
+      "spotify_playlist_uri": "spotify:playlist:7INcD4lmarWTQiDVodjVt4"
     },
     {
       "id": "energetic",
       "label": "Energetic",
       "freqHz": 10.0,
       "color": "#FF7043",
-      "spotify_playlist_uri": "spotify:playlist:2rKxqZEf3zcoateybTiJDn"
+      "spotify_playlist_uri": "spotify:playlist:09C8ZGUepJGErYZcI7s2Ns"
     },
     {
       "id": "sad",
       "label": "Sad",
       "freqHz": 12.0,
       "color": "#7986CB",
-      "spotify_playlist_uri": "spotify:playlist:1wPOxU0IbMdxzfyUfo0Ejl"
+      "spotify_playlist_uri": "spotify:playlist:37i9dQZF1EIgQH9bEAs3FZ"
     }
   ]
 }
