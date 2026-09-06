@@ -66,8 +66,16 @@ export function App() {
   return (
     <div className="app">
       <header className="app__header">
-        <div className="app__title">SSVEP Player</div>
-        <NowPlayingPanel />
+        <div className="app__title">♫ SSVEP Player</div>
+        <nav className="app__breadcrumb">
+          <span className={layer === "mood" ? "app__breadcrumb-step app__breadcrumb-step--active" : "app__breadcrumb-step"}>
+            Playlists
+          </span>
+          <span className="app__breadcrumb-sep">›</span>
+          <span className={layer === "transport" ? "app__breadcrumb-step app__breadcrumb-step--active" : "app__breadcrumb-step"}>
+            Playback
+          </span>
+        </nav>
         <button className="app__calibrate-btn" onClick={() => setScreen("calibration")}>
           Run Calibration
         </button>
@@ -82,6 +90,10 @@ export function App() {
           <TransportLayer highlightedTileId={lastFiredTileId} mode={flickerMode} onTileActivate={handleTileActivate} />
         )}
       </main>
+
+      <div className="app__now-playing-bar">
+        <NowPlayingPanel />
+      </div>
 
       <footer className="app__debug">
         detected: {detectedLabel ?? "—"} (confidence {detectionConfidence.toFixed(2)}) · layer: {layer}

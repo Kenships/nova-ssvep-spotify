@@ -119,6 +119,8 @@ class SpotifyClient:
             "artist": ", ".join(a["name"] for a in item.get("artists", [])),
             "album_art_url": (item.get("album", {}).get("images") or [{}])[0].get("url"),
             "is_playing": playback.get("is_playing", False),
+            "progress_ms": playback.get("progress_ms", 0),
+            "duration_ms": item.get("duration_ms", 0),
         }
 
 

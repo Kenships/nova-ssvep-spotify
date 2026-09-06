@@ -23,6 +23,8 @@ interface NowPlaying {
   artist: string;
   album_art_url: string | null;
   is_playing: boolean;
+  progress_ms: number;
+  duration_ms: number;
 }
 
 interface PlayerState {

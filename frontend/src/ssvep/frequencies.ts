@@ -16,10 +16,10 @@ export const MOOD_TILES: FreqTile[] = [
 ];
 
 export const TRANSPORT_TILES: FreqTile[] = [
-  { id: "play_pause", label: "Play / Pause", freqHz: 7.5, color: "#4FC3F7" },
-  { id: "next", label: "Next", freqHz: 60 / 7, color: "#FFD54F" },
-  { id: "previous", label: "Previous", freqHz: 10.0, color: "#FF7043" },
-  { id: "back_to_mood", label: "Change Mood", freqHz: 12.0, color: "#7986CB" },
+  { id: "play_pause", label: "⏯  Play / Pause", freqHz: 7.5, color: "#4FC3F7" },
+  { id: "next", label: "⏭  Next", freqHz: 60 / 7, color: "#FFD54F" },
+  { id: "previous", label: "⏮  Previous", freqHz: 10.0, color: "#FF7043" },
+  { id: "back_to_mood", label: "↩  Back to Playlists", freqHz: 12.0, color: "#7986CB" },
 ];
 
 /**
