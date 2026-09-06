@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+.spotify_token_cache
+
+node_modules/
+dist/
+*.tsbuildinfo
+
+.env
+*.xdf
