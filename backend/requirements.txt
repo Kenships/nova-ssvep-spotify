@@ -1,0 +1,10 @@
+fastapi==0.115.*
+uvicorn[standard]==0.32.*
+python-dotenv==1.0.*
+pylsl==1.16.*
+numpy==2.1.*
+scipy==1.14.*
+scikit-learn==1.5.*
+spotipy==2.24.*
+pyyaml==6.0.*
+pytest==8.3.*
