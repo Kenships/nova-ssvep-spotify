@@ -191,8 +191,21 @@ async def manual_command(req: ManualCommandRequest):
 
 async def _detection_loop() -> None:
     ingest.start()
+    was_connected = True
     while True:
         await asyncio.sleep(0.25)
+
+        if not ingest.is_connected():
+            if was_connected:
+                logger.error("EEG stream disconnected; detection paused until it reconnects.")
+                await manager.broadcast({"type": "error", "message": "EEG stream disconnected"})
+                was_connected = False
+            continue
+        if not was_connected:
+            logger.info("EEG stream reconnected; resuming detection.")
+            await manager.broadcast({"type": "info", "message": "EEG stream reconnected"})
+            was_connected = True
+
         window, fs = ingest.get_window()
         if fs <= 0 or len(window) < int(fs * settings.window_sec):
             continue  # not enough buffered samples yet

@@ -15,10 +15,11 @@ from __future__ import annotations
 
 import logging
 import threading
+import time
 from collections import deque
 
 import numpy as np
-from pylsl import StreamInlet, resolve_byprop
+from pylsl import LostError, StreamInlet, resolve_byprop
 
 logger = logging.getLogger(__name__)
 
@@ -83,18 +84,32 @@ class LSLIngest:
         window_sec: float,
         preferred_channel_labels: list[str],
         fallback_channel_indices: list[int],
+        stale_timeout_sec: float = 2.0,
     ):
         self.stream_name = stream_name
         self.resolve_timeout_sec = resolve_timeout_sec
         self.window_sec = window_sec
         self.preferred_channel_labels = preferred_channel_labels
         self.fallback_channel_indices = fallback_channel_indices
+        # How long we'll tolerate zero new samples arriving before treating
+        # the stream as effectively dead. liblsl's own `recover=True` (the
+        # StreamInlet default, active whenever the outlet sets a source_id
+        # like our mock and the real eego stream both do) silently
+        # reconnects broken TCP transport without ever raising LostError --
+        # confirmed by killing the mock outlet mid-session: the inlet object
+        # stays alive and `connected` never flips, but no new samples land
+        # for several seconds while liblsl reconnects underneath. Without
+        # this check, get_window() would keep serving a frozen buffer as if
+        # nothing were wrong.
+        self.stale_timeout_sec = stale_timeout_sec
 
         self.inlet: StreamInlet | None = None
         self.fs: float = 0.0
         self.channel_labels: list[str] = []
         self.occipital_indices: list[int] = []
         self.buffer: RingBuffer | None = None
+        self.connected: bool = False
+        self._last_sample_time: float = 0.0
 
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
@@ -122,6 +137,8 @@ class LSLIngest:
         max_samples = max(int(self.fs * self.window_sec * 2), 1)
         self.buffer = RingBuffer(max_samples, len(self.occipital_indices))
 
+        self.connected = True
+        self._last_sample_time = time.monotonic()
         logger.info(
             "Connected to LSL stream '%s': fs=%.2fHz, channels=%s, occipital_indices=%s",
             self.stream_name, self.fs, self.channel_labels, self.occipital_indices,
@@ -129,23 +146,62 @@ class LSLIngest:
 
     @staticmethod
     def _read_channel_labels(info, n_channels: int) -> list[str]:
+        """Falls back to a numeric index (as a string) per-channel when the
+        stream doesn't report a label for it -- e.g. raw electrode indices
+        instead of 10-20 names (see resolve_channel_indices)."""
         labels = []
         ch = info.desc().child("channels").child("channel")
         for _ in range(n_channels):
             label = ch.child_value("label")
             labels.append(label if label else str(len(labels)))
             ch = ch.next_sibling()
-        if not any(labels):
-            return [str(i) for i in range(n_channels)]
         return labels
 
     def _pull_loop(self) -> None:
         assert self.inlet is not None and self.buffer is not None
         while not self._stop.is_set():
-            samples, _timestamps = self.inlet.pull_chunk(timeout=0.2)
+            try:
+                samples, _timestamps = self.inlet.pull_chunk(timeout=0.2)
+            except LostError:
+                # Real amplifiers/dongles can drop out mid-session; the mock
+                # never does this, so this path is only exercised on hardware
+                # day. Surface it via `connected` rather than dying silently
+                # and leaving callers reading a frozen buffer forever.
+                logger.error(
+                    "LSL stream '%s' was lost; attempting to reconnect...", self.stream_name
+                )
+                self.connected = False
+                if not self._reconnect():
+                    return  # stop() was requested while waiting to reconnect
+                continue
             if samples:
                 occipital_samples = [[s[i] for i in self.occipital_indices] for s in samples]
                 self.buffer.push(occipital_samples)
+                self._last_sample_time = time.monotonic()
+
+    def _reconnect(self) -> bool:
+        """Blocks (polling `_stop`) until the stream reappears.
+
+        Returns True once reconnected, False if stop() was called first.
+        """
+        while not self._stop.is_set():
+            try:
+                self.connect()
+                logger.info("Reconnected to LSL stream '%s'.", self.stream_name)
+                return True
+            except RuntimeError:
+                self._stop.wait(1.0)
+        return False
+
+    def is_connected(self) -> bool:
+        """False if the inlet was lost outright, or if liblsl's own silent
+        `recover` mechanism is mid-reconnect and no fresh sample has arrived
+        within `stale_timeout_sec` -- either way, callers should not trust
+        get_window() until this is True again.
+        """
+        if not self.connected:
+            return False
+        return (time.monotonic() - self._last_sample_time) < self.stale_timeout_sec
 
     def start(self) -> None:
         if self.inlet is None:
