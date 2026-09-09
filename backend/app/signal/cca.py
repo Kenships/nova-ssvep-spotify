@@ -31,11 +31,11 @@ def score_frequencies(
     """
     n_samples = window.shape[0]
     scores: dict[str, float] = {}
-    n_components = min(1, window.shape[1])  # first canonical pair is what SSVEP-CCA uses
+    n_components = 1  # first canonical pair is what SSVEP-CCA uses
     for label, f0 in candidate_freqs.items():
         ref = _reference_signals(f0, n_samples, fs, n_harmonics)
         try:
-            cca = CCA(n_components=max(n_components, 1))
+            cca = CCA(n_components=n_components)
             x_c, y_c = cca.fit_transform(window, ref)
             corr = np.corrcoef(x_c[:, 0], y_c[:, 0])[0, 1]
         except Exception:
