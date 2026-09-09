@@ -1,6 +1,7 @@
 import numpy as np
 
-from app.signal.cca import detect
+import app.signal.cca as cca_module
+from app.signal.cca import detect, score_frequencies
 
 CANDIDATES = {"calm": 7.5, "happy": 60 / 7, "energetic": 10.0, "sad": 12.0}
 
@@ -19,3 +20,31 @@ def test_cca_detect_picks_attended_frequency():
         detected, confidence = detect(window, fs, CANDIDATES)
         assert detected == label, f"expected {label} ({freq}Hz), got {detected}"
         assert confidence > 0.3
+
+
+def test_detect_returns_none_for_empty_candidate_set():
+    fs = 250.0
+    window = _sine(10.0, fs, 2.0)
+    label, confidence = detect(window, fs, {})
+    assert label is None
+    assert confidence == 0.0
+
+
+class _RaisingCCA:
+    """Stands in for sklearn's CCA to force score_frequencies' except branch,
+    independent of whatever numerical behavior a given sklearn version has
+    for degenerate input (which may not reliably raise on its own)."""
+
+    def __init__(self, n_components: int = 1):
+        self.n_components = n_components
+
+    def fit_transform(self, x, y):
+        raise ValueError("boom")
+
+
+def test_score_frequencies_handles_cca_failure_gracefully(monkeypatch):
+    fs = 250.0
+    window = _sine(10.0, fs, 2.0)
+    monkeypatch.setattr(cca_module, "CCA", _RaisingCCA)
+    scores = score_frequencies(window, fs, CANDIDATES)
+    assert all(score == 0.0 for score in scores.values())

@@ -34,3 +34,17 @@ def test_preprocess_runs_end_to_end():
     out = preprocess(signal, fs, 5.0, 40.0, 60.0)
     assert out.shape == signal.shape
     assert np.all(np.isfinite(out))
+
+
+def test_notch_passthrough_when_freq_non_positive():
+    fs = 250.0
+    signal = _sine(10.0, fs, 1.0)
+    assert np.array_equal(notch(signal, fs, 0.0), signal)
+    assert np.array_equal(notch(signal, fs, -5.0), signal)
+
+
+def test_notch_passthrough_when_freq_at_or_above_nyquist():
+    fs = 250.0
+    signal = _sine(10.0, fs, 1.0)
+    assert np.array_equal(notch(signal, fs, fs / 2.0), signal)
+    assert np.array_equal(notch(signal, fs, fs), signal)

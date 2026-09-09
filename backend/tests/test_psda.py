@@ -1,6 +1,6 @@
 import numpy as np
 
-from app.signal.psda import detect, score_frequencies
+from app.signal.psda import _bin_power, detect, score_frequencies
 
 CANDIDATES = {"calm": 7.5, "happy": 60 / 7, "energetic": 10.0, "sad": 12.0}
 
@@ -34,3 +34,17 @@ def test_detect_handles_pure_noise_without_crashing():
     window = rng.normal(0, 1.0, (int(fs * 2.0), 4))
     label, confidence = detect(window, fs, CANDIDATES)
     assert confidence >= 0.0
+
+
+def test_bin_power_returns_zero_when_no_bin_within_tolerance():
+    freqs = np.array([0.0, 1.0, 2.0, 3.0])
+    power = np.array([10.0, 20.0, 30.0, 40.0])
+    assert _bin_power(freqs, power, target_hz=100.0, tol_hz=0.3) == 0.0
+
+
+def test_detect_returns_none_for_empty_candidate_set():
+    fs = 250.0
+    window = np.zeros((int(fs * 2.0), 4))
+    label, confidence = detect(window, fs, {})
+    assert label is None
+    assert confidence == 0.0
