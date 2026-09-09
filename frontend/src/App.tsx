@@ -20,6 +20,7 @@ export function App() {
   const detectionConfidence = usePlayerStore((s) => s.detectionConfidence);
   const lastFiredTileId = usePlayerStore((s) => s.lastFiredTileId);
   const flickerMode = usePlayerStore((s) => s.flickerMode);
+  const streamWarning = usePlayerStore((s) => s.streamWarning);
 
   useCommandSocket(
     useCallback(
@@ -82,6 +83,8 @@ export function App() {
         <SettingsMenu />
         <div className={`app__ws-status app__ws-status--${wsStatus}`}>{wsStatus}</div>
       </header>
+
+      {streamWarning && <div className="app__stream-warning">⚠ {streamWarning}</div>}
 
       <main className="app__stage">
         {layer === "mood" ? (

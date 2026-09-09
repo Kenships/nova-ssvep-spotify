@@ -152,6 +152,15 @@ body {
   color: #777;
 }
 
+.app__stream-warning {
+  padding: 0.5rem 1.5rem;
+  background: #FF704333;
+  color: #FF7043;
+  font-size: 0.85rem;
+  font-weight: 600;
+  text-align: center;
+}
+
 .app__stage {
   flex: 1;
   min-height: 0;

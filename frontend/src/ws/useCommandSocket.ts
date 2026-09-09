@@ -3,7 +3,9 @@ import { usePlayerStore } from "../state/playerStore";
 
 type CommandMessage = { type: "command"; layer: "mood" | "transport"; target: string };
 type DebugMessage = { type: "debug"; detectedLabel: string | null; confidence: number; layer: string };
-type ServerMessage = CommandMessage | DebugMessage;
+type ErrorMessage = { type: "error"; message: string };
+type InfoMessage = { type: "info"; message: string };
+type ServerMessage = CommandMessage | DebugMessage | ErrorMessage | InfoMessage;
 
 const WS_URL = `${window.location.protocol === "https:" ? "wss" : "ws"}://${window.location.host}/ws/commands`;
 const RECONNECT_DELAY_MS = 1500;
@@ -17,6 +19,7 @@ const RECONNECT_DELAY_MS = 1500;
 export function useCommandSocket(onCommand: (msg: CommandMessage) => void) {
   const setWsStatus = usePlayerStore((s) => s.setWsStatus);
   const setDetection = usePlayerStore((s) => s.setDetection);
+  const setStreamWarning = usePlayerStore((s) => s.setStreamWarning);
   const onCommandRef = useRef(onCommand);
   onCommandRef.current = onCommand;
 
@@ -38,6 +41,10 @@ export function useCommandSocket(onCommand: (msg: CommandMessage) => void) {
           setDetection(msg.detectedLabel, msg.confidence);
         } else if (msg.type === "command") {
           onCommandRef.current(msg);
+        } else if (msg.type === "error") {
+          setStreamWarning(msg.message);
+        } else if (msg.type === "info") {
+          setStreamWarning(null);
         }
       };
 

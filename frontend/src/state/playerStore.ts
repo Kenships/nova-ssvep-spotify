@@ -37,6 +37,10 @@ interface PlayerState {
   nowPlaying: NowPlaying | null;
   measuredRefreshHz: number | null;
   flickerMode: FlickerMode;
+  /** Set from a backend {"type":"error"} WS message (e.g. the EEG/LSL stream
+   * dropping out mid-session); cleared by the matching {"type":"info"}
+   * once it recovers. Null means nothing to warn about. */
+  streamWarning: string | null;
 
   setLayer: (layer: Layer) => void;
   setCurrentMood: (moodId: string) => void;
@@ -46,6 +50,7 @@ interface PlayerState {
   setNowPlaying: (np: NowPlaying | null) => void;
   setMeasuredRefreshHz: (hz: number) => void;
   setFlickerMode: (mode: FlickerMode) => void;
+  setStreamWarning: (message: string | null) => void;
 }
 
 export const usePlayerStore = create<PlayerState>((set) => ({
@@ -58,6 +63,7 @@ export const usePlayerStore = create<PlayerState>((set) => ({
   nowPlaying: null,
   measuredRefreshHz: null,
   flickerMode: loadStoredFlickerMode(),
+  streamWarning: null,
 
   setLayer: (layer) => set({ layer }),
   setCurrentMood: (moodId) => set({ currentMoodId: moodId }),
@@ -74,4 +80,5 @@ export const usePlayerStore = create<PlayerState>((set) => ({
     }
     set({ flickerMode: mode });
   },
+  setStreamWarning: (message) => set({ streamWarning: message }),
 }));
