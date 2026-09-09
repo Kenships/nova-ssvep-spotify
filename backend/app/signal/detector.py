@@ -1,14 +1,17 @@
 """Common detector interface. Everything downstream (command_bus, ws_server)
-talks to this module only — it doesn't know or care whether PSDA or CCA is
-active. Toggle via config.detector_backend or the DETECTOR_BACKEND env var,
-so the two can be A/B'd live if one turns out to be flaky on hardware day.
+talks to this module only — it doesn't know or care whether PSDA, CCA, or
+FBCCA is active. Toggle via config.detector_backend or the DETECTOR_BACKEND
+env var, so backends can be A/B'd live if one turns out to be flaky on
+hardware day.
 """
 from __future__ import annotations
 
 import numpy as np
 
-from . import cca, psda
+from . import cca, fbcca, psda
 from .filters import preprocess
+
+_IMPLS = {"psda": psda, "cca": cca, "fbcca": fbcca}
 
 
 class Detector:
@@ -20,7 +23,7 @@ class Detector:
         mains_notch_hz: float,
         confidence_threshold: float,
     ):
-        if backend not in ("psda", "cca"):
+        if backend not in _IMPLS:
             raise ValueError(f"unknown detector backend: {backend}")
         self.backend = backend
         self.bandpass_low_hz = bandpass_low_hz
@@ -43,8 +46,7 @@ class Detector:
         filtered = preprocess(
             window, fs, self.bandpass_low_hz, self.bandpass_high_hz, self.mains_notch_hz
         )
-        impl = psda if self.backend == "psda" else cca
-        label, confidence = impl.detect(filtered, fs, candidate_freqs)
+        label, confidence = _IMPLS[self.backend].detect(filtered, fs, candidate_freqs)
         if confidence < self.confidence_threshold:
             return None, confidence
         return label, confidence

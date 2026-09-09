@@ -60,7 +60,7 @@ class Settings:
     bandpass_high_hz: float = float(os.environ.get("BANDPASS_HIGH_HZ", "40.0"))
     mains_notch_hz: float = float(os.environ.get("MAINS_NOTCH_HZ", "60.0"))  # 60Hz in Canada
     window_sec: float = float(os.environ.get("WINDOW_SEC", "2.0"))
-    detector_backend: str = os.environ.get("DETECTOR_BACKEND", "psda")  # "psda" | "cca"
+    detector_backend: str = os.environ.get("DETECTOR_BACKEND", "psda")  # "psda" | "cca" | "fbcca"
     confidence_threshold: float = float(os.environ.get("CONFIDENCE_THRESHOLD", "0.35"))
 
     # --- Command bus ---
