@@ -19,5 +19,5 @@ async def main(duration_sec: float):
             pass
 
 
-if __name__ == "__main__":
+if __name__ == "__main__":  # pragma: no cover
     asyncio.run(main(float(sys.argv[1]) if len(sys.argv) > 1 else 20.0))

@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import { useCanvasResizeObserver } from "../canvas/useCanvasResizeObserver";
 import type { FreqTile } from "./frequencies";
 import { SINE_MODULATION_DEPTH, type FlickerMode } from "./flickerModes";
 
@@ -70,7 +71,7 @@ function computeTileRects(tiles: FreqTile[], width: number, height: number): Pix
   const rows = Math.ceil(tiles.length / cols);
   const cellW = width / cols;
   const cellH = height / rows;
-  const padding = Math.min(cellW, cellH) * 0.08;
+  const padding = Math.min(cellW, cellH) * 0.16;
   return tiles.map((_, i) => {
     const col = i % cols;
     const row = Math.floor(i / cols);
@@ -116,6 +117,12 @@ export function FlickerCanvas({
   // would get silently reset mid-animation.
   const pulsesRef = useRef<Map<string, ClickPulse>>(new Map());
 
+  // Keeps canvas.width/height in sync with layout (see the hook's own doc
+  // comment for why a window "resize" listener alone isn't enough -- e.g.
+  // the debug side panel opening/closing). No onResize callback needed:
+  // the rAF loop below already reads canvas.width/height fresh every frame.
+  useCanvasResizeObserver(canvasRef);
+
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -123,13 +130,6 @@ export function FlickerCanvas({
     if (!ctx) return;
 
     const dpr = window.devicePixelRatio || 1;
-    const resize = () => {
-      const rect = canvas.getBoundingClientRect();
-      canvas.width = rect.width * dpr;
-      canvas.height = rect.height * dpr;
-    };
-    resize();
-    window.addEventListener("resize", resize);
 
     let frameCount = 0;
     let startTime: number | null = null;
@@ -169,9 +169,7 @@ export function FlickerCanvas({
       // Cols/rows are picked so cellW*cols and cellH*rows land exactly on w
       // and h -- a fixed pixel cell size stepped from the tile's corner
       // leaves a leftover partial strip on the bottom/right edge whenever
-      // w/h isn't an exact multiple of it, which reads as off-center
-      // (worse once tiles stopped being uniform grid cells -- see the
-      // media-player transport layout).
+      // w/h isn't an exact multiple of it, which reads as off-center.
       const phase = Math.sin(2 * Math.PI * tile.freqHz * t) >= 0;
       const targetCellSize = Math.max(Math.min(w, h) / 6, 4);
       const cols = Math.max(1, Math.round(w / targetCellSize));
@@ -356,7 +354,6 @@ export function FlickerCanvas({
 
     return () => {
       cancelAnimationFrame(rafRef.current);
-      window.removeEventListener("resize", resize);
       canvas.removeEventListener("click", handleClick);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps

@@ -43,6 +43,9 @@ def signal_to_noise_ratio(
     return target_power / max(noise_power, 1e-12)
 
 
+DEFAULT_SNR_OK_THRESHOLD = 3.0
+
+
 def run_calibration_check(
     per_target_windows: dict[str, np.ndarray],
     fs: float,
@@ -50,7 +53,7 @@ def run_calibration_check(
     bandpass_low_hz: float,
     bandpass_high_hz: float,
     mains_notch_hz: float,
-    snr_threshold: float = 3.0,
+    snr_threshold: float = DEFAULT_SNR_OK_THRESHOLD,
 ) -> dict[str, dict]:
     """per_target_windows: label -> EEG window captured while the user was
     cued to look at that target. Returns label -> {snr, ok} report.

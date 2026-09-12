@@ -35,4 +35,18 @@ this document, not a discovery session.
 
 ## Findings (fill in after investigation / hardware day)
 
-_(nothing recorded yet)_
+- **2026-09-12, live network test (eego over LAN, 500Hz, Oz/O1/O2, PSDA):**
+  10Hz and 12Hz targets (mood "Energetic" / transport "Previous", and mood
+  "Sad" / transport "Back to Playlists" respectively — see
+  `frontend/src/ssvep/frequencies.ts`) felt subjectively most responsive to
+  the test subject, compared to 7.5Hz and 8.571Hz. A single spot-check
+  (`Detector.detect_with_scores` on a live captured window) confirmed a
+  clean, strong 10Hz detection (confidence 0.66, peak power ~3.1M vs next
+  candidate ~830K) while directly fixating on it — so at least at 10Hz the
+  detector itself is working correctly on this subject/setup; whether
+  7.5/8.571Hz are inherently weaker for this subject or just weren't
+  fixated as directly wasn't isolated. Worth a proper per-frequency SNR
+  comparison via the calibration screen (equal fixation time each) before
+  concluding anything about frequency choice — alpha-band proximity
+  (~8-12Hz) and individual variability in SSVEP responsiveness are both
+  plausible explanations, not necessarily a setup problem.

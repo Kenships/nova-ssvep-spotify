@@ -11,10 +11,10 @@ def test_load_moods_returns_the_four_configured_moods():
 def test_frequency_map_matches_backend_candidate_set():
     moods = load_moods()
     freqs = frequency_map(moods)
-    assert freqs["calm"] == 7.5
-    assert freqs["energetic"] == 10.0
-    assert freqs["sad"] == 12.0
-    assert freqs["happy"] == 60 / 7
+    assert freqs["calm"] == 15.0
+    assert freqs["energetic"] == 18.0
+    assert freqs["sad"] == 19.5
+    assert freqs["happy"] == 16.5
 
 
 def test_playlist_uri_for_known_and_unknown_mood():

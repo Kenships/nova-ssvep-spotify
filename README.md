@@ -76,6 +76,31 @@ cd backend
 .venv\Scripts\python -m pytest tests/ -v
 ```
 
+`backend/app` is held to 100% line coverage (enforced via `backend/pytest.ini`).
+The simulator and `scripts/smoke_test_ws_client.py` have their own suite,
+covered the same way, run from the repo root instead (uses the same venv):
+```
+backend\.venv\Scripts\python -m pytest
+```
+
+Frontend state/reconnection regressions and the production build:
+```
+cd frontend
+npm test
+npm run build
+```
+
+Calibration pauses playback commands on the backend for all connected
+clients. Reloading restores that paused state; use **Exit calibration** or
+**Continue to Player** to resume. Automatic detection waits for the
+calibration stimulus to leave the analysis window before accepting inputs.
+Choose **Start signal check** to measure each target; the check reports SNR
+and does not train the detector or save calibration settings. Each target
+waits for a fresh analysis window before readings are accepted. Missing or
+failed readings are shown as unavailable, and **Run again** repeats the check.
+If the EEG source is absent at startup, the backend retries discovery while
+keeping the API available. Source switches wait for the old reader to stop.
+
 ## Switching to real ant-neuro hardware
 
 Change exactly one thing: `LSL_STREAM_NAME` in `backend/.env`, to the

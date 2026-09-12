@@ -69,7 +69,7 @@ export function NowPlayingPanel() {
         </div>
       </div>
       <div className={`now-playing__status now-playing__status--${nowPlaying.is_playing ? "playing" : "paused"}`}>
-        {nowPlaying.is_playing ? "▶" : "⏸"}
+        {nowPlaying.is_playing ? "⏸" : "▶"}
       </div>
     </div>
   );

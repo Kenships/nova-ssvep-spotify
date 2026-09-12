@@ -47,3 +47,18 @@ def test_score_frequencies_handles_cca_failure_gracefully(monkeypatch):
     monkeypatch.setattr(fbcca_module, "CCA", _RaisingCCA)
     scores = score_frequencies(window, fs, CANDIDATES)
     assert all(score == 0.0 for score in scores.values())
+
+
+def test_score_frequencies_handles_bandpass_failure_gracefully(monkeypatch):
+    """A sub-band that fails to filter (e.g. an invalid frequency range)
+    falls back to an all-zero sub-band rather than crashing the whole
+    shared filter bank -- it'll just correlate as 0 for every candidate."""
+    fs = 250.0
+    window = _sine(10.0, fs, 2.0)
+
+    def raising_bandpass(*args, **kwargs):
+        raise ValueError("boom")
+
+    monkeypatch.setattr(fbcca_module, "bandpass", raising_bandpass)
+    scores = score_frequencies(window, fs, CANDIDATES)
+    assert all(score == 0.0 for score in scores.values())

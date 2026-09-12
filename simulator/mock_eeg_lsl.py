@@ -9,7 +9,7 @@ hand -- the backend's lsl_ingest.py doesn't know or care that this is fake.
 
 Usage:
     python mock_eeg_lsl.py                     # defaults to 10Hz, idle after
-    python mock_eeg_lsl.py --freq 7.5          # attend a specific frequency
+    python mock_eeg_lsl.py --freq 15.0         # attend a specific frequency
     python mock_eeg_lsl.py --script scenarios/demo_script.yaml  # scripted run
 
 While running interactively (no --script), press number keys 1-4 to switch
@@ -32,11 +32,16 @@ NOISE_AMPLITUDE = 0.3
 SIGNAL_AMPLITUDE = 1.0
 
 # Keep in sync with backend/app/config.py's mood_frequencies / transport_frequencies.
+# Moved off the original 7.5/8.57/10/12Hz set, which sat almost entirely
+# inside the 8-12Hz alpha band and caused idle-state false detections on at
+# least one subject's real EEG (2026-09-12) -- irrelevant to this synthetic
+# source's own noise floor, but kept in sync anyway so simulator runs still
+# match what the real detector is actually listening for.
 FREQUENCY_PRESETS = {
-    "1": 7.5,
-    "2": 60 / 7,
-    "3": 10.0,
-    "4": 12.0,
+    "1": 15.0,
+    "2": 16.5,
+    "3": 18.0,
+    "4": 19.5,
     "0": None,  # idle / no attended target
 }
 
@@ -93,8 +98,8 @@ class MockEEGSource:
 
 
 def _keyboard_control_loop(source: MockEEGSource) -> None:
-    print("Press 1=Calm/PlayPause(7.5Hz) 2=Happy/Next(8.57Hz) 3=Energetic/Prev(10Hz) "
-          "4=Sad/BackToMood(12Hz) 0=idle, Ctrl+C to quit")
+    print("Press 1=Calm/PlayPause(15Hz) 2=Happy/Next(16.5Hz) 3=Energetic/Prev(18Hz) "
+          "4=Sad/BackToMood(19.5Hz) 0=idle, Ctrl+C to quit")
     while True:
         key = sys.stdin.readline().strip()
         if key in FREQUENCY_PRESETS:
@@ -138,5 +143,5 @@ def main() -> None:
             print("\n[mock_eeg_lsl] stopping")
 
 
-if __name__ == "__main__":
+if __name__ == "__main__":  # pragma: no cover
     main()

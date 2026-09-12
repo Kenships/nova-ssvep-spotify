@@ -4,10 +4,18 @@ GET /api/config/moods so it's never duplicated in two places.
 """
 from __future__ import annotations
 
+from functools import lru_cache
+
 from ..config import settings
 
 
+@lru_cache(maxsize=1)
 def load_moods() -> list[dict]:
+    """Cached: this file is static app config (edited by hand, not at
+    runtime), but it's read on every detection-loop tick and polled by the
+    calibration screen every second -- re-parsing JSON from disk that often
+    for data that never changes mid-session is pure waste. Restart the
+    backend to pick up an edit."""
     data = settings.load_mood_playlists()
     return data["moods"]
 

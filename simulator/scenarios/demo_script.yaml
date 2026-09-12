@@ -7,17 +7,17 @@
 steps:
   - freq_hz: null
     duration_sec: 2.0
-  - freq_hz: 10.0       # Mood layer: Energetic
+  - freq_hz: 18.0       # Mood layer: Energetic
     duration_sec: 3.0
   - freq_hz: null
     duration_sec: 1.5
-  - freq_hz: 8.571428571428571  # Transport layer: Next
+  - freq_hz: 16.5       # Transport layer: Next
     duration_sec: 3.0
   - freq_hz: null
     duration_sec: 1.5
-  - freq_hz: 7.5        # Transport layer: Play/Pause
+  - freq_hz: 15.0       # Transport layer: Play/Pause
     duration_sec: 3.0
   - freq_hz: null
     duration_sec: 1.5
-  - freq_hz: 12.0       # Transport layer: Back to Mood
+  - freq_hz: 19.5       # Transport layer: Back to Mood
     duration_sec: 3.0

@@ -68,22 +68,24 @@ class Settings:
     refractory_sec: float = float(os.environ.get("REFRACTORY_SEC", "1.0"))
 
     # --- SSVEP target frequencies (Hz) ---
-    # Collision-free set for a 60Hz display: avoid pairing a frequency with
-    # its 2nd harmonic on screen at the same time (6&12, 7.5&15 collide).
+    # Experimental targets, shared with frontend/src/ssvep/frequencies.ts.
+    # Moving targets above 12Hz is a hypothesis to evaluate with matched
+    # idle/fixation recordings; the repository does not establish improved
+    # accuracy or a reliable idle-rejection threshold for this set.
     mood_frequencies: dict[str, float] = field(
         default_factory=lambda: {
-            "calm": 7.5,
-            "happy": 60 / 7,  # 8.571428... Hz
-            "energetic": 10.0,
-            "sad": 12.0,
+            "calm": 15.0,
+            "happy": 16.5,
+            "energetic": 18.0,
+            "sad": 19.5,
         }
     )
     transport_frequencies: dict[str, float] = field(
         default_factory=lambda: {
-            "play_pause": 7.5,
-            "next": 60 / 7,
-            "previous": 10.0,
-            "back_to_mood": 12.0,
+            "play_pause": 15.0,
+            "next": 16.5,
+            "previous": 18.0,
+            "back_to_mood": 19.5,
         }
     )
 

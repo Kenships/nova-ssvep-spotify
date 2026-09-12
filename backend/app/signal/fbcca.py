@@ -1,15 +1,31 @@
-"""Optional detector upgrade: Filter-Bank CCA (Chen et al. 2015).
+"""Optional detector upgrade: Filter-Bank CCA (Chen et al. 2015, "Filter
+bank canonical correlation analysis for implementing a high-speed
+SSVEP-based brain-computer interface", J. Neural Eng. 12 046008).
 
-Same no-training-data property as cca.py, but splits the window into
-sub-bands (fundamental, 2nd harmonic range, 3rd...) and combines each
-sub-band's canonical correlation with the standard weighting that favours
-the lower, stronger-SNR sub-bands. Reuses cca.py's reference-signal and CCA
-machinery and filters.py's bandpass — this is a scoring strategy on top of
-existing pieces, not a new signal-processing stack.
+Implements their best-performing "M3" filter bank design: a SHARED bank of
+n_subbands, built once from the raw window, then correlated against every
+candidate frequency's CCA reference signal -- not a fresh filter per
+candidate (an earlier version of this file did that; a different,
+unvalidated design that also filtered n_subbands x n_candidates times
+instead of just n_subbands times). The nth sub-band spans
+[n * f0_base - 2, high_hz], where f0_base is the lowest candidate
+frequency -- matching the paper's use of their lowest stimulus frequency as
+the shared base unit for a filter bank reused across all candidates.
 
-~n_subbands x more CCA calls than plain cca.py per window. Only worth
-switching to once ANT Neuro's extra channels/SNR give the bank something
-real to separate — on noisy/short setups it can underperform plain CCA.
+Defaults (n_subbands=7, n_harmonics=5, weight w(n) = n^-a + b with
+a=1.25, b=0.25) match the paper's own grid-search-optimized parameters for
+M3, and high_hz=88 matches their empirical finding that SSVEP harmonic SNR
+(not amplitude, which drops fast) stays usable up to roughly that frequency
+-- see their figure 5. That specific number came from their setup, not a
+law of nature; worth re-validating against this project's own hardware if
+accuracy matters enough to chase further. BANDPASS_HIGH_HZ (config.py) must
+be >= high_hz or the outer preprocessing step truncates sub-bands before
+this module ever sees them.
+
+Same no-training-data property as cca.py. CCA fit count is still
+n_subbands x n_candidates per window (unchanged from before) -- the shared
+filter bank only saves the bandpass filtering step, not the dominant CCA
+cost.
 """
 import numpy as np
 from sklearn.cross_decomposition import CCA
@@ -22,13 +38,28 @@ def _subband_weight(m: int, a: float = 1.25, b: float = 0.25) -> float:
     return m ** (-a) + b
 
 
+def _build_filter_bank(
+    window: np.ndarray, fs: float, f0_base: float, n_subbands: int, high_hz: float
+) -> list[np.ndarray]:
+    """Shared sub-bands, computed once from the raw window and reused for
+    every candidate's CCA correlation below."""
+    subbands = []
+    for m in range(1, n_subbands + 1):
+        low_hz = max(f0_base * m - 2.0, 1.0)
+        try:
+            subbands.append(bandpass(window, fs, low_hz, high_hz))
+        except Exception:
+            subbands.append(np.zeros_like(window))
+    return subbands
+
+
 def score_frequencies(
     window: np.ndarray,
     fs: float,
     candidate_freqs: dict[str, float],
-    n_harmonics: int = 2,
-    n_subbands: int = 3,
-    high_hz: float = 45.0,
+    n_harmonics: int = 5,
+    n_subbands: int = 7,
+    high_hz: float = 88.0,
 ) -> dict[str, float]:
     """window: (n_samples, n_channels), already bandpass+notch filtered.
 
@@ -36,18 +67,20 @@ def score_frequencies(
     normalized to [0, 1] by the max achievable weight sum so it's comparable
     to cca.py's confidence scale.
     """
+    if not candidate_freqs:
+        return {}
     n_samples = window.shape[0]
     n_components = 1  # first canonical pair is what SSVEP-CCA uses
     weight_sum = sum(_subband_weight(m) for m in range(1, n_subbands + 1))
+    f0_base = min(candidate_freqs.values())
+    subbands = _build_filter_bank(window, fs, f0_base, n_subbands, high_hz)
 
     scores: dict[str, float] = {}
     for label, f0 in candidate_freqs.items():
         ref = _reference_signals(f0, n_samples, fs, n_harmonics)
         total = 0.0
-        for m in range(1, n_subbands + 1):
-            low_hz = max(f0 * m - 2.0, 1.0)
+        for m, sub in enumerate(subbands, start=1):
             try:
-                sub = bandpass(window, fs, low_hz, high_hz)
                 cca = CCA(n_components=n_components)
                 x_c, y_c = cca.fit_transform(sub, ref)
                 rho = np.corrcoef(x_c[:, 0], y_c[:, 0])[0, 1]
@@ -62,8 +95,8 @@ def detect(
     window: np.ndarray,
     fs: float,
     candidate_freqs: dict[str, float],
-    n_harmonics: int = 2,
-    n_subbands: int = 3,
+    n_harmonics: int = 5,
+    n_subbands: int = 7,
 ) -> tuple[str | None, float]:
     """Returns (best_label_or_None, confidence in [0, 1])."""
     scores = score_frequencies(window, fs, candidate_freqs, n_harmonics, n_subbands)

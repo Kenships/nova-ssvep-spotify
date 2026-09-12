@@ -10,7 +10,7 @@ import pytest
 from pylsl import LostError
 
 import app.lsl_ingest as lsl_ingest_module
-from app.lsl_ingest import LSLIngest, RingBuffer, resolve_channel_indices
+from app.lsl_ingest import LSLIngest, RingBuffer, discover_streams, resolve_channel_indices
 
 
 def _wait_until(predicate, timeout=2.0, interval=0.01) -> bool:
@@ -55,9 +55,12 @@ class FakeDesc:
 
 
 class FakeStreamInfo:
-    def __init__(self, fs, labels):
+    def __init__(self, fs, labels, hostname="fake-host", name="FakeStream", type_="EEG"):
         self._fs = fs
         self._labels = labels
+        self._hostname = hostname
+        self._name = name
+        self._type = type_
 
     def nominal_srate(self):
         return self._fs
@@ -67,6 +70,15 @@ class FakeStreamInfo:
 
     def desc(self):
         return FakeDesc(self._labels)
+
+    def hostname(self):
+        return self._hostname
+
+    def name(self):
+        return self._name
+
+    def type(self):
+        return self._type
 
 
 class FakeInlet:
@@ -270,3 +282,207 @@ def test_stop_interrupts_reconnect_wait_promptly(monkeypatch):
 
     assert elapsed < 0.9
     assert not ingest._thread.is_alive()
+
+
+# --- discover_streams -----------------------------------------------------
+
+
+def test_discover_streams_lists_visible_streams(monkeypatch):
+    infos = [
+        FakeStreamInfo(250.0, ["Oz"], hostname="host-a", name="MockEEG", type_="EEG"),
+        FakeStreamInfo(500.0, ["Fp1", "Fp2"], hostname="host-b", name="RealEEG", type_="EEG"),
+    ]
+    monkeypatch.setattr(lsl_ingest_module, "resolve_streams", lambda wait_time: infos)
+
+    result = discover_streams(wait_time=1.0)
+
+    assert result == [
+        {"name": "MockEEG", "type": "EEG", "channel_count": 1, "nominal_srate": 250.0, "hostname": "host-a"},
+        {"name": "RealEEG", "type": "EEG", "channel_count": 2, "nominal_srate": 500.0, "hostname": "host-b"},
+    ]
+
+
+def test_discover_streams_returns_empty_list_when_nothing_found(monkeypatch):
+    monkeypatch.setattr(lsl_ingest_module, "resolve_streams", lambda wait_time: [])
+    assert discover_streams(wait_time=0.5) == []
+
+
+# --- LSLIngest.switch_stream() ---------------------------------------------
+
+
+def test_switch_stream_moves_to_a_different_stream(monkeypatch):
+    info_a = FakeStreamInfo(250.0, ["Oz"], hostname="host-a")
+    info_b = FakeStreamInfo(500.0, ["Fp1", "Fp2"], hostname="host-b")
+    inlet_a = FakeInlet(info_a, chunks=[[[1]]])
+    inlet_b = FakeInlet(info_b, chunks=[[[2, 3]]])
+
+    streams_by_name = {"StreamA": info_a, "StreamB": info_b}
+    inlets_by_info = {id(info_a): inlet_a, id(info_b): inlet_b}
+    monkeypatch.setattr(
+        lsl_ingest_module, "resolve_byprop", lambda _prop, name, timeout: [streams_by_name[name]]
+    )
+    monkeypatch.setattr(lsl_ingest_module, "StreamInlet", lambda info: inlets_by_info[id(info)])
+
+    ingest = LSLIngest("StreamA", 1.0, 2.0, ["Oz", "Fp1"], [])
+    ingest.start()
+    try:
+        assert _wait_until(lambda: ingest.hostname == "host-a", timeout=2.0)
+
+        ingest.switch_stream("StreamB")
+
+        assert ingest.stream_name == "StreamB"
+        assert ingest.hostname == "host-b"
+        assert ingest.fs == 500.0
+        assert _wait_until(lambda: len(ingest.buffer) >= 1, timeout=2.0)
+        assert ingest.is_connected() is True
+    finally:
+        ingest.stop()
+
+
+def test_switch_stream_leaves_disconnected_when_new_stream_not_found(monkeypatch):
+    info_a = FakeStreamInfo(250.0, ["Oz"], hostname="host-a")
+    inlet_a = FakeInlet(info_a, chunks=[[[1]]])
+
+    def fake_resolve(_prop, name, timeout):
+        return [info_a] if name == "StreamA" else []
+
+    monkeypatch.setattr(lsl_ingest_module, "resolve_byprop", fake_resolve)
+    monkeypatch.setattr(lsl_ingest_module, "StreamInlet", lambda _info: inlet_a)
+
+    ingest = LSLIngest("StreamA", 0.01, 2.0, ["Oz"], [])
+    ingest.start()
+    try:
+        assert _wait_until(lambda: ingest.connected is True, timeout=2.0)
+
+        with pytest.raises(RuntimeError):
+            ingest.switch_stream("Nonexistent")
+
+        assert ingest.connected is False
+        assert ingest.stream_name == "Nonexistent"
+    finally:
+        ingest.stop()
+
+
+
+def test_repeated_start_does_not_create_another_reader(monkeypatch):
+    info = FakeStreamInfo(250, ["Oz"])
+    monkeypatch.setattr(lsl_ingest_module, "resolve_byprop", lambda *a, **k: [info])
+    monkeypatch.setattr(lsl_ingest_module, "StreamInlet", lambda _: FakeInlet(info))
+    ingest = LSLIngest("Fake", 0.01, 2, ["Oz"], [])
+    ingest.start()
+    first = ingest._thread
+    try:
+        ingest.start()
+        assert ingest._thread is first
+    finally:
+        ingest.stop()
+
+
+def test_switch_refuses_to_reuse_stop_event_until_reader_exits():
+    class StuckReader:
+        def join(self, timeout):
+            pass
+        def is_alive(self):
+            return True
+    ingest = LSLIngest("Old", 0.01, 2, ["Oz"], [])
+    ingest._thread = StuckReader()
+    with pytest.raises(RuntimeError, match="has not stopped"):
+        ingest.switch_stream("New")
+    assert ingest._stop.is_set()
+    assert ingest.stream_name == "Old"
+    with pytest.raises(RuntimeError, match="still stopping"):
+        ingest.start()
+    assert ingest._stop.is_set()
+
+
+def test_switch_waits_for_reconnecting_reader_before_new_source(monkeypatch):
+    import threading
+    entered, release = threading.Event(), threading.Event()
+    info = FakeStreamInfo(250, ["Oz"])
+    calls = []
+    def resolve(_prop, name, timeout):
+        calls.append(name)
+        if calls == ["Old", "Old"]:
+            entered.set()
+            assert release.wait(3)
+            return []
+        return [info]
+    inlets = [FakeInlet(info, raise_lost_on_call=1), FakeInlet(info, chunks=[[[42]]])]
+    monkeypatch.setattr(lsl_ingest_module, "resolve_byprop", resolve)
+    monkeypatch.setattr(lsl_ingest_module, "StreamInlet", lambda _: inlets.pop(0))
+    ingest = LSLIngest("Old", 2, 2, ["Oz"], [])
+    ingest.start()
+    old_reader = ingest._thread
+    errors = []
+    def switch():
+        try:
+            ingest.switch_stream("New")
+        except Exception as exc:
+            errors.append(exc)
+    switcher = threading.Thread(target=switch)
+    try:
+        assert entered.wait(1)
+        switcher.start()
+        # The former 1-second join timeout cleared the event here.
+        time.sleep(1.1)
+        assert switcher.is_alive()
+        assert ingest._stop.is_set()
+        assert ingest.stream_name == "Old"
+        release.set()
+        switcher.join(2)
+        assert not switcher.is_alive()
+        assert not errors
+        assert not old_reader.is_alive()
+        assert ingest.stream_name == "New"
+        assert _wait_until(lambda: len(ingest.buffer) > 0)
+        assert ingest.get_window()[0].tolist() == [[42]]
+    finally:
+        release.set()
+        if switcher.ident is not None:
+            switcher.join(3)
+        ingest.stop()
+
+
+
+def test_window_before_connection_is_empty():
+    ingest = LSLIngest("Fake", 0.01, 2, ["Oz"], [])
+    window, fs = ingest.get_window()
+    assert window.shape == (0, 0)
+    assert fs == 0
+
+
+def test_silent_recovery_discards_samples_before_gap(monkeypatch):
+    info = FakeStreamInfo(250, ["Oz"])
+    ingest = LSLIngest("Fake", 0.01, 2, ["Oz"], [])
+    class RecoveringInlet(FakeInlet):
+        def pull_chunk(self, timeout):
+            # A resumed source delivers a fresh sample after a long gap.
+            ingest._last_sample_time = time.monotonic() - 10
+            ingest._stop.set()  # finish after this chunk
+            return [[42]], [0]
+    monkeypatch.setattr(lsl_ingest_module, "resolve_byprop", lambda *a, **k: [info])
+    monkeypatch.setattr(lsl_ingest_module, "StreamInlet", lambda _: RecoveringInlet(info))
+    ingest.connect()
+    ingest.buffer.push([[1]] * 500)
+    ingest._pull_loop()
+    assert ingest.get_window()[0].tolist() == [[42]]
+
+
+def test_failed_metadata_read_does_not_publish_partial_connection(monkeypatch):
+    info = FakeStreamInfo(250, ["Oz"])
+    class BrokenInlet(FakeInlet):
+        def info(self):
+            raise RuntimeError("metadata unavailable")
+    monkeypatch.setattr(lsl_ingest_module, "resolve_byprop", lambda *a, **k: [info])
+    monkeypatch.setattr(lsl_ingest_module, "StreamInlet", lambda _: BrokenInlet(info))
+    ingest = LSLIngest("Fake", 0.01, 2, ["Oz"], [])
+    with pytest.raises(RuntimeError, match="metadata unavailable"):
+        ingest.start()
+    assert ingest.inlet is None
+    assert not ingest.is_connected()
+    monkeypatch.setattr(lsl_ingest_module, "StreamInlet", lambda _: FakeInlet(info))
+    ingest.start()
+    try:
+        assert ingest._thread.is_alive()
+    finally:
+        ingest.stop()

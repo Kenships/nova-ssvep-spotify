@@ -19,26 +19,45 @@ import time
 from collections import deque
 
 import numpy as np
-from pylsl import LostError, StreamInlet, resolve_byprop
+from pylsl import LostError, StreamInlet, resolve_byprop, resolve_streams
 
 logger = logging.getLogger(__name__)
+
+
+def discover_streams(wait_time: float = 3.0) -> list[dict]:
+    """Lists every LSL stream currently visible on the network -- powers the
+    frontend's input-source picker so switching sources doesn't require
+    already knowing the exact stream name in advance."""
+    return [
+        {
+            "name": s.name(),
+            "type": s.type(),
+            "channel_count": s.channel_count(),
+            "nominal_srate": s.nominal_srate(),
+            "hostname": s.hostname(),
+        }
+        for s in resolve_streams(wait_time=wait_time)
+    ]
 
 
 class RingBuffer:
     def __init__(self, max_samples: int, n_channels: int):
         self._buf: deque[np.ndarray] = deque(maxlen=max_samples)
         self.n_channels = n_channels
+        self._lock = threading.Lock()
 
     def push(self, samples: list[list[float]]) -> None:
-        for s in samples:
-            self._buf.append(np.asarray(s, dtype=np.float64))
+        with self._lock:
+            for s in samples:
+                self._buf.append(np.asarray(s, dtype=np.float64))
 
     def snapshot(self) -> np.ndarray:
         """Returns (n_samples, n_channels), oldest first. May be shorter
         than requested if not enough samples have arrived yet."""
-        if not self._buf:
-            return np.empty((0, self.n_channels))
-        return np.stack(self._buf, axis=0)
+        with self._lock:
+            if not self._buf:
+                return np.empty((0, self.n_channels))
+            return np.stack(self._buf, axis=0)
 
     def __len__(self) -> int:
         return len(self._buf)
@@ -107,12 +126,15 @@ class LSLIngest:
         self.fs: float = 0.0
         self.channel_labels: list[str] = []
         self.occipital_indices: list[int] = []
+        self.hostname: str = ""
         self.buffer: RingBuffer | None = None
         self.connected: bool = False
         self._last_sample_time: float = 0.0
 
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
+        self._lifecycle_lock = threading.RLock()
+        self._data_lock = threading.Lock()
 
     def connect(self) -> None:
         streams = resolve_byprop("name", self.stream_name, timeout=self.resolve_timeout_sec)
@@ -122,23 +144,24 @@ class LSLIngest:
                 f"{self.resolve_timeout_sec}s. Is the simulator or eego "
                 f"acquisition software running with LSL export enabled?"
             )
-        self.inlet = StreamInlet(streams[0])
-        info = self.inlet.info()
-
-        # Never hardcode this — read it from the stream itself.
-        self.fs = info.nominal_srate()
-        n_channels = info.channel_count()
-
-        self.channel_labels = self._read_channel_labels(info, n_channels)
-        self.occipital_indices = resolve_channel_indices(
-            self.channel_labels, self.preferred_channel_labels, self.fallback_channel_indices
+        inlet = StreamInlet(streams[0])
+        info = inlet.info()
+        fs = info.nominal_srate()
+        channel_labels = self._read_channel_labels(info, info.channel_count())
+        indices = resolve_channel_indices(
+            channel_labels, self.preferred_channel_labels, self.fallback_channel_indices
         )
-
-        max_samples = max(int(self.fs * self.window_sec * 2), 1)
-        self.buffer = RingBuffer(max_samples, len(self.occipital_indices))
-
-        self.connected = True
-        self._last_sample_time = time.monotonic()
+        # Publish the new sample rate and buffer together: readers must not
+        # interpret an old window at a newly connected source's sample rate.
+        with self._data_lock:
+            self.inlet = inlet
+            self.fs = fs
+            self.hostname = info.hostname()
+            self.channel_labels = channel_labels
+            self.occipital_indices = indices
+            self.buffer = RingBuffer(max(int(fs * self.window_sec * 2), 1), len(indices))
+            self.connected = True
+            self._last_sample_time = time.monotonic()
         logger.info(
             "Connected to LSL stream '%s': fs=%.2fHz, channels=%s, occipital_indices=%s",
             self.stream_name, self.fs, self.channel_labels, self.occipital_indices,
@@ -176,8 +199,12 @@ class LSLIngest:
                 continue
             if samples:
                 occipital_samples = [[s[i] for i in self.occipital_indices] for s in samples]
-                self.buffer.push(occipital_samples)
-                self._last_sample_time = time.monotonic()
+                now = time.monotonic()
+                with self._data_lock:
+                    if now - self._last_sample_time >= self.stale_timeout_sec:
+                        self.buffer = RingBuffer(max(int(self.fs * self.window_sec * 2), 1), len(self.occipital_indices))
+                    self.buffer.push(occipital_samples)
+                    self._last_sample_time = now
 
     def _reconnect(self) -> bool:
         """Blocks (polling `_stop`) until the stream reappears.
@@ -199,27 +226,64 @@ class LSLIngest:
         within `stale_timeout_sec` -- either way, callers should not trust
         get_window() until this is True again.
         """
-        if not self.connected:
+        if self._stop.is_set() or not self.connected:
             return False
         return (time.monotonic() - self._last_sample_time) < self.stale_timeout_sec
 
     def start(self) -> None:
-        if self.inlet is None:
-            self.connect()
-        self._thread = threading.Thread(target=self._pull_loop, daemon=True)
-        self._thread.start()
+        with self._lifecycle_lock:
+            if self._thread is not None and self._thread.is_alive():
+                if self._stop.is_set():
+                    raise RuntimeError("EEG reader is still stopping")
+                return
+            self._stop.clear()
+            if self.inlet is None:
+                self.connect()
+            self._thread = threading.Thread(target=self._pull_loop, daemon=True)
+            self._thread.start()
 
     def stop(self) -> None:
-        self._stop.set()
-        if self._thread is not None:
-            self._thread.join(timeout=1.0)
+        with self._lifecycle_lock:
+            self._stop.set()
+            if self._thread is not None:
+                self._thread.join(timeout=self.resolve_timeout_sec + 2.0)
+                if self._thread.is_alive():
+                    raise RuntimeError("EEG reader has not stopped; retry after it exits")
+            self.connected = False
+
+    def switch_stream(self, new_stream_name: str) -> None:
+        """Disconnects from whatever's currently connected (if anything) and
+        connects to a different stream by name instead -- lets the
+        frontend's input-source picker change sources live, without
+        restarting the whole backend process.
+
+        Waits for the old reader to exit, then resolves the new stream.
+        Run in a worker thread to keep the API responsive. Raises RuntimeError
+        (from connect()) if the new stream can't be found -- the caller is
+        left fully disconnected in that case, matching the explicit intent
+        to move off whatever was previously connected rather than silently
+        keeping the old one.
+        """
+        with self._lifecycle_lock:
+            self.stop()
+            with self._data_lock:
+                self.stream_name = new_stream_name
+                self.inlet = None
+                self.fs = 0.0
+                self.channel_labels = []
+                self.occipital_indices = []
+                self.hostname = ""
+                self.buffer = None
+            self.start()
 
     def get_window(self, window_sec: float | None = None) -> tuple[np.ndarray, float]:
         """Returns (window, fs) for the most recent `window_sec` of data."""
-        assert self.buffer is not None
-        window_sec = window_sec if window_sec is not None else self.window_sec
-        n_needed = int(self.fs * window_sec)
-        snap = self.buffer.snapshot()
-        if len(snap) < n_needed:
-            return snap, self.fs
-        return snap[-n_needed:], self.fs
+        with self._data_lock:
+            if self.buffer is None:
+                return np.empty((0, len(self.occipital_indices))), self.fs
+            window_sec = window_sec if window_sec is not None else self.window_sec
+            n_needed = int(self.fs * window_sec)
+            snap = self.buffer.snapshot()
+            if len(snap) < n_needed:
+                return snap, self.fs
+            return snap[-n_needed:], self.fs

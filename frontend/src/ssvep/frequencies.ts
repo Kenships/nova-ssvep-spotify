@@ -1,6 +1,7 @@
-// Collision-free SSVEP frequency set for a 60Hz display (integer frame
-// periods, no drift). Must stay in sync with backend/app/config.py's
-// mood_frequencies / transport_frequencies.
+// Experimental targets; keep synchronized with backend/app/config.py.
+// Improved idle rejection has not been established by matched recordings.
+// Elapsed-time rendering samples the stimulus at the display refresh rate;
+// actual presentation timing still needs validation on the target display.
 // Fractions of the canvas (0..1). When a tile set provides these, FlickerCanvas
 // lays tiles out at these exact rects instead of its default auto square grid.
 export interface TileRect {
@@ -19,20 +20,19 @@ export interface FreqTile {
 }
 
 export const MOOD_TILES: FreqTile[] = [
-  { id: "calm", label: "Calm", freqHz: 7.5, color: "#4FC3F7" },
-  { id: "happy", label: "Happy", freqHz: 60 / 7, color: "#FFD54F" },
-  { id: "energetic", label: "Energetic", freqHz: 10.0, color: "#FF7043" },
-  { id: "sad", label: "Sad", freqHz: 12.0, color: "#7986CB" },
+  { id: "calm", label: "Calm", freqHz: 15.0, color: "#00F5FF" },
+  { id: "happy", label: "Happy", freqHz: 16.5, color: "#DFFF00" },
+  { id: "energetic", label: "Energetic", freqHz: 18.0, color: "#FF5F1F" },
+  { id: "sad", label: "Sad", freqHz: 19.5, color: "#FF00FF" },
 ];
 
-// Laid out like a real media player: Previous/Play-Pause/Next in a row with
-// Play/Pause widened and centered between the other two, Back to Playlists
-// as a footer strip underneath -- rather than the generic 2x2 grid.
+// Generic 2x2 grid, same as MOOD_TILES -- no explicit rect, so FlickerCanvas
+// falls back to its auto square grid layout.
 export const TRANSPORT_TILES: FreqTile[] = [
-  { id: "previous", label: "⏮  Previous", freqHz: 10.0, color: "#FF7043", rect: { x: 0.0, y: 0.0, w: 0.29, h: 0.72 } },
-  { id: "play_pause", label: "⏯  Play / Pause", freqHz: 7.5, color: "#4FC3F7", rect: { x: 0.31, y: 0.0, w: 0.38, h: 0.72 } },
-  { id: "next", label: "⏭  Next", freqHz: 60 / 7, color: "#FFD54F", rect: { x: 0.71, y: 0.0, w: 0.29, h: 0.72 } },
-  { id: "back_to_mood", label: "↩  Back to Playlists", freqHz: 12.0, color: "#7986CB", rect: { x: 0.0, y: 0.76, w: 1.0, h: 0.24 } },
+  { id: "previous", label: "⏮  Previous", freqHz: 18.0, color: "#FF5F1F" },
+  { id: "play_pause", label: "⏯  Play / Pause", freqHz: 15.0, color: "#00F5FF" },
+  { id: "next", label: "⏭  Next", freqHz: 16.5, color: "#DFFF00" },
+  { id: "back_to_mood", label: "↩  Back to Playlists", freqHz: 19.5, color: "#FF00FF" },
 ];
 
 /**
@@ -42,4 +42,12 @@ export const TRANSPORT_TILES: FreqTile[] = [
  */
 export function framePeriodFor(freqHz: number, measuredRefreshHz: number): number {
   return Math.max(1, Math.round(measuredRefreshHz / freqHz));
+}
+
+const ALL_TILES = [...MOOD_TILES, ...TRANSPORT_TILES];
+
+/** Human-readable label for a mood or transport tile id, e.g. for display
+ * in the current-mood title or the recent-detections queue. */
+export function labelForTileId(id: string): string {
+  return ALL_TILES.find((t) => t.id === id)?.label ?? id;
 }

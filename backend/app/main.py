@@ -12,6 +12,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
+from contextlib import suppress
 import time
 
 from fastapi import FastAPI, HTTPException, WebSocket
@@ -19,9 +21,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, RedirectResponse
 from pydantic import BaseModel
 
+from .calibration import DEFAULT_SNR_OK_THRESHOLD, signal_to_noise_ratio
 from .commands.command_bus import CommandBus, Layer
 from .config import settings
-from .lsl_ingest import LSLIngest
+from .lsl_ingest import LSLIngest, discover_streams
 from .signal.detector import Detector
 from .spotify.mood_map import frequency_map, load_moods, playlist_uri_for
 from .spotify.spotify_client import spotify_client
@@ -55,11 +58,148 @@ detector = Detector(
 command_bus = CommandBus(dwell_sec=settings.dwell_sec, refractory_sec=settings.refractory_sec)
 
 _detection_task: asyncio.Task | None = None
+_control_lock = asyncio.Lock()
+_ingest_lock = asyncio.Lock()
+_calibration_active = False
+_current_mood: str | None = None
+_control_revision = 0
+_switching_stream = False
+
+
+def player_state() -> dict:
+    return {
+        "type": "state", "layer": command_bus.layer.value,
+        "currentMoodId": _current_mood, "calibrationActive": _calibration_active,
+    }
+
+
+class CalibrationRequest(BaseModel):
+    active: bool
+
+
+@app.post("/api/calibration/session")
+async def set_calibration_session(req: CalibrationRequest):
+    global _calibration_active, _control_revision
+    async with _control_lock:
+        _calibration_active = req.active
+        _control_revision += 1
+        command_bus.enter_refractory()
+        # Drain the calibration stimulus from the detector window before resuming.
+        if not req.active:
+            command_bus.enter_refractory(duration_sec=max(settings.window_sec, command_bus.refractory_sec))
+        state = player_state()
+        await manager.broadcast(state)
+        return state
 
 
 @app.get("/api/config/moods")
 def get_moods():
     return {"moods": load_moods()}
+
+
+def _lsl_status() -> dict:
+    return {
+        "stream_name": ingest.stream_name,
+        "connected": ingest.is_connected(),
+        "fs": ingest.fs,
+        "channel_count": len(ingest.channel_labels),
+        "channel_labels": ingest.channel_labels,
+        "occipital_indices": ingest.occipital_indices,
+        "hostname": ingest.hostname,
+    }
+
+
+@app.get("/api/lsl/status")
+def get_lsl_status():
+    """What the backend is actually connected to right now -- the frontend's
+    input-source picker polls this to confirm a switch really took effect,
+    not just that the request was accepted."""
+    return _lsl_status()
+
+
+@app.get("/api/lsl/discover")
+def get_lsl_discover(timeout: float = 3.0):
+    """Every LSL stream currently visible on the network, so the picker can
+    offer a list instead of requiring the exact stream name up front."""
+    return {"streams": discover_streams(wait_time=timeout)}
+
+
+class LSLSwitchRequest(BaseModel):
+    stream_name: str
+
+
+@app.post("/api/lsl/switch")
+async def post_lsl_switch(req: LSLSwitchRequest):
+    global _switching_stream, _control_revision
+    async with _ingest_lock:
+        _switching_stream = True
+        _control_revision += 1
+        command_bus.reset_dwell()
+        try:
+            await asyncio.to_thread(ingest.switch_stream, req.stream_name)
+        except RuntimeError as e:
+            raise HTTPException(status_code=503, detail=str(e))
+        finally:
+            command_bus.reset_dwell()
+            _switching_stream = False
+    return _lsl_status()
+
+
+class DwellConfigUpdate(BaseModel):
+    dwell_sec: float | None = None
+    confidence_threshold: float | None = None
+
+
+@app.get("/api/config/detection")
+def get_detection_config():
+    """Live detector settings, including the active instance's confidence gate."""
+    return {
+        "dwell_sec": command_bus.dwell_sec, "window_sec": settings.window_sec,
+        "confidence_threshold": detector.confidence_threshold, "detector_backend": detector.backend,
+    }
+
+
+@app.post("/api/config/detection")
+def set_detection_config(req: DwellConfigUpdate):
+    global _control_revision
+    if req.dwell_sec is None and req.confidence_threshold is None:
+        raise HTTPException(status_code=400, detail="Provide dwell_sec or confidence_threshold")
+    if req.dwell_sec is not None and (not math.isfinite(req.dwell_sec) or req.dwell_sec <= 0):
+        raise HTTPException(status_code=400, detail="dwell_sec must be positive and finite")
+    if req.confidence_threshold is not None and (
+        not math.isfinite(req.confidence_threshold) or not 0 < req.confidence_threshold <= 1
+    ):
+        raise HTTPException(status_code=400, detail="confidence_threshold must be greater than 0 and at most 1")
+    if req.dwell_sec is not None:
+        command_bus.dwell_sec = req.dwell_sec
+    if req.confidence_threshold is not None:
+        detector.confidence_threshold = req.confidence_threshold
+    command_bus.reset_dwell()
+    _control_revision += 1
+    return get_detection_config()
+
+
+@app.get("/api/calibration/snr")
+def get_calibration_snr(label: str):
+    """Live signal-to-noise ratio for one mood target, computed from
+    whatever's currently in the ingest ring buffer -- the calibration screen
+    polls this while cueing each target in turn so the user sees real signal
+    quality feedback instead of just a countdown.
+    """
+    freqs = frequency_map(load_moods())
+    if label not in freqs:
+        raise HTTPException(
+            status_code=400, detail=f"'{label}' is not a valid mood id; expected one of {sorted(freqs)}"
+        )
+    if not ingest.is_connected():
+        return {"label": label, "ready": False, "snr": 0.0, "ok": False}
+    window, fs = ingest.get_window()
+    if fs <= 0 or len(window) < int(fs * settings.window_sec):
+        return {"label": label, "ready": False, "snr": 0.0, "ok": False}
+    snr = signal_to_noise_ratio(
+        window, fs, freqs[label], settings.bandpass_low_hz, settings.bandpass_high_hz, settings.mains_notch_hz
+    )
+    return {"label": label, "ready": True, "snr": snr, "ok": snr >= DEFAULT_SNR_OK_THRESHOLD}
 
 
 @app.get("/api/now-playing")
@@ -95,7 +235,7 @@ def spotify_callback(code: str | None = None, error: str | None = None):
 
 @app.websocket("/ws/commands")
 async def ws_commands(ws: WebSocket):
-    await websocket_endpoint(ws)
+    await websocket_endpoint(ws, player_state)
 
 
 def _current_candidate_freqs() -> dict[str, float]:
@@ -127,22 +267,31 @@ def _apply_spotify_side_effect(layer: Layer, label: str) -> None:
         spotify_client.previous_track()
 
 
-async def _handle_fired_command(label: str) -> None:
-    layer = command_bus.layer
+async def _handle_fired_command(
+    label: str, target_layer: Layer | None = None, expected_revision: int | None = None,
+) -> None:
+    global _current_mood, _control_revision
+    async with _control_lock:
+        if _calibration_active:
+            raise HTTPException(status_code=409, detail="Playback commands are paused during calibration")
+        if expected_revision is not None and expected_revision != _control_revision:
+            return  # This detection belongs to an earlier layer/source/session.
+        layer = target_layer if target_layer is not None else command_bus.layer
+        command_bus.layer = layer
+        if layer == Layer.MOOD:
+            _current_mood = label
+            command_bus.switch_layer(Layer.TRANSPORT)
+        elif label == "back_to_mood":
+            command_bus.switch_layer(Layer.MOOD)
+        command_bus.enter_refractory()
+        _control_revision += 1
 
-    # Broadcast first: the frontend must see the detected command regardless
-    # of whether the downstream Spotify call succeeds.
-    await manager.broadcast({"type": "command", "layer": layer.value, "target": label})
-
-    if layer == Layer.MOOD:
-        command_bus.switch_layer(Layer.TRANSPORT)
-    elif label == "back_to_mood":
-        command_bus.switch_layer(Layer.MOOD)
-
-    try:
-        _apply_spotify_side_effect(layer, label)
-    except Exception:
-        logger.exception("Spotify call failed for fired command %s (layer=%s)", label, layer.value)
+        await manager.broadcast({"type": "command", "layer": layer.value, "target": label})
+        await manager.broadcast(player_state())
+        try:
+            await asyncio.to_thread(_apply_spotify_side_effect, layer, label)
+        except Exception:
+            logger.exception("Spotify call failed for fired command %s (layer=%s)", label, layer.value)
 
 
 class ManualCommandRequest(BaseModel):
@@ -151,51 +300,65 @@ class ManualCommandRequest(BaseModel):
 
 @app.post("/api/manual-command")
 async def manual_command(req: ManualCommandRequest):
-    """Lets the frontend fire a command by direct click/keyboard, bypassing
-    SSVEP detection entirely. Tiles must always be manually operable --
-    for testing without hardware, for a demo when signal quality is poor,
-    and as an accessibility fallback for whoever hasn't lost all voluntary
-    movement yet. Reuses _handle_fired_command so a manual click produces
-    exactly the same broadcast + layer-switch + Spotify side effect as a
-    real detection would.
-
-    Validates against BOTH mood and transport target sets (mood/transport
-    ids are disjoint, so this is unambiguous) rather than only whichever
-    layer command_bus currently thinks it's in. The automatic detector can
-    flip command_bus.layer between when the user sees a tile and when their
-    click actually lands on the backend (confirmed happening in practice --
-    the confidence threshold sits close enough to the noise floor that idle
-    noise alone triggers real layer switches), so a manual click must be
-    layer-agnostic: fire whatever the user actually clicked, and bring
-    command_bus's layer in line with that rather than reject the click for
-    having "the wrong layer" from the user's point of view.
-    """
+    """Manual targets identify their layer so delayed clicks retain their meaning."""
     mood_ids = set(frequency_map(load_moods()).keys())
     transport_ids = set(settings.transport_frequencies.keys())
     if req.target in mood_ids:
-        command_bus.layer = Layer.MOOD
+        target_layer = Layer.MOOD
     elif req.target in transport_ids:
-        command_bus.layer = Layer.TRANSPORT
+        target_layer = Layer.TRANSPORT
     else:
         raise HTTPException(
             status_code=400,
             detail=f"'{req.target}' is not a valid mood or transport target; expected one of {sorted(mood_ids | transport_ids)}",
         )
 
-    await _handle_fired_command(req.target)
+    await _handle_fired_command(req.target, target_layer=target_layer)
     # Block the automatic detector from immediately re-firing the same
     # target right after a manual override.
     command_bus.enter_refractory(time.monotonic())
     return {"layer": command_bus.layer.value, "target": req.target}
 
 
+RAW_DEBUG_WINDOW_SEC = 1.0  # how much history the debug panel's live graph redraws each tick
+
+
+async def _broadcast_raw_debug_window() -> None:
+    """Pushes a snapshot of the raw occipital channel data to any connected
+    debug panels. Gated on has_raw_subscribers() so an idle/closed panel
+    costs nothing -- this runs every detection-loop tick otherwise, and a
+    full window several times a second to every client would add up.
+    """
+    if not manager.has_raw_subscribers():
+        return
+    raw_window, raw_fs = ingest.get_window(RAW_DEBUG_WINDOW_SEC)
+    if len(raw_window) == 0:
+        return
+    await manager.broadcast_raw(
+        {
+            "type": "raw",
+            "fs": raw_fs,
+            "channelLabels": [ingest.channel_labels[i] for i in ingest.occipital_indices],
+            "samples": raw_window.round(2).tolist(),
+        }
+    )
+
+
 async def _detection_loop() -> None:
-    ingest.start()
-    was_connected = True
+    was_connected = ingest.inlet is not None
     while True:
         await asyncio.sleep(0.25)
+        # start() is idempotent; serialize it with source switches and keep
+        # blocking LSL discovery off the API event loop.
+        async with _ingest_lock:
+            try:
+                await asyncio.to_thread(ingest.start)
+            except RuntimeError:
+                command_bus.reset_dwell()
+                continue
 
         if not ingest.is_connected():
+            command_bus.reset_dwell()
             if was_connected:
                 logger.error("EEG stream disconnected; detection paused until it reconnects.")
                 await manager.broadcast({"type": "error", "message": "EEG stream disconnected"})
@@ -206,20 +369,37 @@ async def _detection_loop() -> None:
             await manager.broadcast({"type": "info", "message": "EEG stream reconnected"})
             was_connected = True
 
+        await _broadcast_raw_debug_window()
+
+        if _calibration_active or _switching_stream:
+            command_bus.reset_dwell()
+            continue
+
         window, fs = ingest.get_window()
         if fs <= 0 or len(window) < int(fs * settings.window_sec):
+            command_bus.reset_dwell()
             continue  # not enough buffered samples yet
 
+        revision = _control_revision
         candidate_freqs = _current_candidate_freqs()
-        label, confidence = detector.detect(window, fs, candidate_freqs)
+        label, confidence, scores = detector.detect_with_scores(window, fs, candidate_freqs)
         await manager.broadcast(
-            {"type": "debug", "detectedLabel": label, "confidence": confidence, "layer": command_bus.layer.value}
+            {
+                "type": "debug",
+                "detectedLabel": label,
+                "confidence": confidence,
+                "scores": scores,  # every candidate's confidence, not just the winner's
+                "layer": command_bus.layer.value,
+            }
         )
 
+        if _calibration_active or _switching_stream or revision != _control_revision:
+            command_bus.reset_dwell()
+            continue
         fired = command_bus.feed(label, now=time.monotonic())
         if fired:
             try:
-                await _handle_fired_command(fired)
+                await _handle_fired_command(fired, expected_revision=revision)
             except Exception:
                 logger.exception("Error handling fired command %s", fired)
 
@@ -234,4 +414,7 @@ async def on_startup():
 async def on_shutdown():
     if _detection_task:
         _detection_task.cancel()
-    ingest.stop()
+        with suppress(asyncio.CancelledError):
+            await _detection_task
+    async with _ingest_lock:
+        await asyncio.to_thread(ingest.stop)

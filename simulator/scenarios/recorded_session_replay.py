@@ -76,7 +76,7 @@ def replay(xdf_path: str, stream_name: str, loop: bool) -> None:
         print("[replay] reached end of capture, looping")
 
 
-if __name__ == "__main__":
+if __name__ == "__main__":  # pragma: no cover
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--xdf", required=True, help="Path to the recorded .xdf session")
     parser.add_argument("--name", default="MockEEG", help="LSL stream name to emit")
