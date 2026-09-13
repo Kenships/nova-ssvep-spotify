@@ -257,10 +257,11 @@ def test_spotify_callback_missing_code_branch():
 
 
 def test_get_detection_config_reflects_command_bus_dwell(monkeypatch):
-    monkeypatch.setattr(main, "command_bus", _fresh_command_bus(dwell_sec=1.25))
+    monkeypatch.setattr(main, "command_bus", _fresh_command_bus(dwell_sec=1.25, refractory_sec=2.0))
     assert main.get_detection_config() == {
         "dwell_sec": 1.25, "window_sec": main.settings.window_sec,
         "confidence_threshold": main.detector.confidence_threshold, "detector_backend": main.detector.backend,
+        "refractory_sec": 2.0,
     }
 
 
@@ -278,6 +279,23 @@ def test_set_detection_config_rejects_non_positive_dwell(monkeypatch):
         main.set_detection_config(main.DwellConfigUpdate(dwell_sec=0))
     assert exc_info.value.status_code == 400
     assert main.command_bus.dwell_sec == 0.75  # left untouched
+
+
+def test_set_detection_config_updates_command_bus_refractory(monkeypatch):
+    monkeypatch.setattr(main, "command_bus", _fresh_command_bus(refractory_sec=1.0))
+    result = main.set_detection_config(main.DwellConfigUpdate(refractory_sec=3.0))
+    assert result == main.get_detection_config()
+    assert result["refractory_sec"] == 3.0
+    assert main.command_bus.refractory_sec == 3.0
+
+
+@pytest.mark.parametrize("value", [0, -0.1, float("nan"), float("inf")])
+def test_set_detection_config_rejects_invalid_refractory(monkeypatch, value):
+    monkeypatch.setattr(main, "command_bus", _fresh_command_bus(refractory_sec=1.0))
+    with pytest.raises(HTTPException) as exc_info:
+        main.set_detection_config(main.DwellConfigUpdate(refractory_sec=value))
+    assert exc_info.value.status_code == 400
+    assert main.command_bus.refractory_sec == 1.0  # left untouched
 
 
 def test_spotify_callback_success_branch(monkeypatch):
@@ -387,7 +405,7 @@ def test_handle_fired_command_mood_switches_to_transport_and_broadcasts(monkeypa
 
     assert main.command_bus.layer == Layer.TRANSPORT
     assert recorder.messages == [
-        {"type": "command", "layer": "mood", "target": "calm"},
+        {"type": "command", "layer": "mood", "target": "calm", "refractorySec": main.command_bus.refractory_sec},
         {"type": "state", "layer": "transport", "currentMoodId": "calm", "calibrationActive": False},
     ]
 

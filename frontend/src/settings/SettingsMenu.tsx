@@ -2,14 +2,17 @@ import { useEffect, useRef, useState } from "react";
 import { FLICKER_MODE_OPTIONS } from "../ssvep/flickerModes";
 import { usePlayerStore } from "../state/playerStore";
 
-// Matches the dwell input's `min` attribute below -- kept as one constant so
-// the displayed floor and the actual validation can't drift apart.
+// Matches the dwell/refractory inputs' `min` attributes below -- kept as
+// constants so the displayed floor and the actual validation can't drift apart.
 const MIN_DWELL_SEC = 0.1;
+const MIN_REFRACTORY_SEC = 0.1;
 
 export function SettingsMenu() {
   const [open, setOpen] = useState(false);
   const flickerMode = usePlayerStore((s) => s.flickerMode);
   const setFlickerMode = usePlayerStore((s) => s.setFlickerMode);
+  const refractoryFeedbackEnabled = usePlayerStore((s) => s.refractoryFeedbackEnabled);
+  const setRefractoryFeedbackEnabled = usePlayerStore((s) => s.setRefractoryFeedbackEnabled);
   const containerRef = useRef<HTMLDivElement | null>(null);
 
   // Dwell time: how long a target must be continuously detected before it
@@ -23,17 +26,26 @@ export function SettingsMenu() {
   const [dwellInput, setDwellInput] = useState("");
   const [dwellSaved, setDwellSaved] = useState<number | null>(null);
   const [dwellError, setDwellError] = useState<string | null>(null);
+  // Refractory time: how long detection pauses after a target fires
+  // (backend's CommandBus.refractory_sec) -- also drives how long the
+  // large-input-feedback overlay stays up, so it lives on the backend for
+  // the same live-tuning reason as dwell above.
+  const [refractoryInput, setRefractoryInput] = useState("");
+  const [refractorySaved, setRefractorySaved] = useState<number | null>(null);
+  const [refractoryError, setRefractoryError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
     fetch("/api/config/detection")
       .then((res) => res.json())
-      .then((data: { dwell_sec: number; confidence_threshold: number }) => {
+      .then((data: { dwell_sec: number; confidence_threshold: number; refractory_sec: number }) => {
         if (cancelled) return;
         setDwellInput(String(data.dwell_sec));
         setDwellSaved(data.dwell_sec);
         setConfidenceInput(String(data.confidence_threshold));
         setConfidenceSaved(data.confidence_threshold);
+        setRefractoryInput(String(data.refractory_sec));
+        setRefractorySaved(data.refractory_sec);
       })
       .catch(() => {
         // Best-effort -- leave the field blank if the backend isn't reachable yet.
@@ -85,6 +97,30 @@ export function SettingsMenu() {
       setDwellError(null);
     } catch {
       setDwellError("Could not reach backend");
+    }
+  };
+
+  const applyRefractory = async () => {
+    const value = parseFloat(refractoryInput);
+    if (!Number.isFinite(value) || value < MIN_REFRACTORY_SEC) {
+      setRefractoryError(`Must be at least ${MIN_REFRACTORY_SEC}s`);
+      return;
+    }
+    try {
+      const res = await fetch("/api/config/detection", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ refractory_sec: value }),
+      });
+      if (!res.ok) {
+        setRefractoryError("Backend rejected that value");
+        return;
+      }
+      const data: { refractory_sec: number } = await res.json();
+      setRefractorySaved(data.refractory_sec);
+      setRefractoryError(null);
+    } catch {
+      setRefractoryError("Could not reach backend");
     }
   };
 
@@ -160,6 +196,37 @@ export function SettingsMenu() {
             {dwellSaved !== null && !dwellError && ` Currently ${dwellSaved}s.`}
           </div>
           {dwellError && <div className="settings-menu__error">{dwellError}</div>}
+
+          <label className="settings-menu__field">
+            <span>Refractory period (seconds)</span>
+            <input
+              type="number"
+              min={MIN_REFRACTORY_SEC}
+              step={0.05}
+              value={refractoryInput}
+              onChange={(e) => setRefractoryInput(e.target.value)}
+              onBlur={applyRefractory}
+            />
+          </label>
+          <div className="settings-menu__option-desc">
+            How long detection pauses after a target fires, before a new one can register.
+            {refractorySaved !== null && !refractoryError && ` Currently ${refractorySaved}s.`}
+          </div>
+          {refractoryError && <div className="settings-menu__error">{refractoryError}</div>}
+
+          <label className="settings-menu__option">
+            <input
+              type="checkbox"
+              checked={refractoryFeedbackEnabled}
+              onChange={(event) => setRefractoryFeedbackEnabled(event.target.checked)}
+            />
+            <div>
+              <div className="settings-menu__option-label">Show input during refractory period</div>
+              <div className="settings-menu__option-desc">
+                Hides the tiles and shows the registered input large and centered until the refractory period ends.
+              </div>
+            </div>
+          </label>
 
           <div className="settings-menu__footnote">Tiles are always clickable, in any mode.</div>
         </div>

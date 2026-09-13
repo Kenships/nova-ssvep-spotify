@@ -148,6 +148,7 @@ async def post_lsl_switch(req: LSLSwitchRequest):
 class DwellConfigUpdate(BaseModel):
     dwell_sec: float | None = None
     confidence_threshold: float | None = None
+    refractory_sec: float | None = None
 
 
 @app.get("/api/config/detection")
@@ -156,24 +157,29 @@ def get_detection_config():
     return {
         "dwell_sec": command_bus.dwell_sec, "window_sec": settings.window_sec,
         "confidence_threshold": detector.confidence_threshold, "detector_backend": detector.backend,
+        "refractory_sec": command_bus.refractory_sec,
     }
 
 
 @app.post("/api/config/detection")
 def set_detection_config(req: DwellConfigUpdate):
     global _control_revision
-    if req.dwell_sec is None and req.confidence_threshold is None:
-        raise HTTPException(status_code=400, detail="Provide dwell_sec or confidence_threshold")
+    if req.dwell_sec is None and req.confidence_threshold is None and req.refractory_sec is None:
+        raise HTTPException(status_code=400, detail="Provide dwell_sec, confidence_threshold, or refractory_sec")
     if req.dwell_sec is not None and (not math.isfinite(req.dwell_sec) or req.dwell_sec <= 0):
         raise HTTPException(status_code=400, detail="dwell_sec must be positive and finite")
     if req.confidence_threshold is not None and (
         not math.isfinite(req.confidence_threshold) or not 0 < req.confidence_threshold <= 1
     ):
         raise HTTPException(status_code=400, detail="confidence_threshold must be greater than 0 and at most 1")
+    if req.refractory_sec is not None and (not math.isfinite(req.refractory_sec) or req.refractory_sec <= 0):
+        raise HTTPException(status_code=400, detail="refractory_sec must be positive and finite")
     if req.dwell_sec is not None:
         command_bus.dwell_sec = req.dwell_sec
     if req.confidence_threshold is not None:
         detector.confidence_threshold = req.confidence_threshold
+    if req.refractory_sec is not None:
+        command_bus.refractory_sec = req.refractory_sec
     command_bus.reset_dwell()
     _control_revision += 1
     return get_detection_config()
@@ -286,7 +292,9 @@ async def _handle_fired_command(
         command_bus.enter_refractory()
         _control_revision += 1
 
-        await manager.broadcast({"type": "command", "layer": layer.value, "target": label})
+        await manager.broadcast(
+            {"type": "command", "layer": layer.value, "target": label, "refractorySec": command_bus.refractory_sec}
+        )
         await manager.broadcast(player_state())
         try:
             await asyncio.to_thread(_apply_spotify_side_effect, layer, label)

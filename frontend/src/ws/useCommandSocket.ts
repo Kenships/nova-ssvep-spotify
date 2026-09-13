@@ -1,7 +1,7 @@
 import { useEffect, useRef } from "react";
 import { usePlayerStore, type ServerPlayerState } from "../state/playerStore";
 
-type CommandMessage = { type: "command"; layer: "mood" | "transport"; target: string };
+type CommandMessage = { type: "command"; layer: "mood" | "transport"; target: string; refractorySec: number };
 type DebugMessage = {
   type: "debug";
   detectedLabel: string | null;

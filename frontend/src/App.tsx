@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { CalibrationScreen } from "./calibration/CalibrationScreen";
 import { DebugPanelContent, DebugPanelToggle } from "./debug/DebugPanel";
 import { DetectionQueue } from "./detections/DetectionQueue";
@@ -25,15 +25,44 @@ export function App() {
   const lastFiredTileId = usePlayerStore((s) => s.lastFiredTileId);
   const flickerMode = usePlayerStore((s) => s.flickerMode);
   const streamWarning = usePlayerStore((s) => s.streamWarning);
+  const refractoryFeedbackEnabled = usePlayerStore((s) => s.refractoryFeedbackEnabled);
+
+  // While set, the stage shows the fired input large and centered instead of
+  // the tiles, for the backend's refractory period that follows every fired
+  // command -- a fresh object per command (via `key`) so the auto-clear
+  // effect below always times the *latest* one, even if a new command fires
+  // before the previous refractory period ended.
+  const [refractoryDisplay, setRefractoryDisplay] = useState<{ label: string; durationSec: number; key: number } | null>(null);
+  // Kept around (never cleared to null) so the overlay's fade-*out*
+  // transition still has a label to show instead of going blank the instant
+  // `refractoryDisplay` clears -- only the CSS visibility class, driven by
+  // `refractoryDisplay`, controls whether it's actually seen.
+  const [refractoryLabel, setRefractoryLabel] = useState<string | null>(null);
 
   useCommandSocket(
     useCallback(
       (msg) => {
         setLastFired(msg.target);
+        if (refractoryFeedbackEnabled && msg.refractorySec > 0) {
+          setRefractoryDisplay({ label: msg.target, durationSec: msg.refractorySec, key: Date.now() });
+          setRefractoryLabel(msg.target);
+        }
       },
-      [setLastFired],
+      [setLastFired, refractoryFeedbackEnabled],
     ),
   );
+
+  useEffect(() => {
+    if (!refractoryDisplay) return;
+    const timer = setTimeout(() => setRefractoryDisplay(null), refractoryDisplay.durationSec * 1000);
+    return () => clearTimeout(timer);
+  }, [refractoryDisplay]);
+
+  // Toggling the setting off mid-display should hide it immediately rather
+  // than waiting out whatever refractory period is already in progress.
+  useEffect(() => {
+    if (!refractoryFeedbackEnabled) setRefractoryDisplay(null);
+  }, [refractoryFeedbackEnabled]);
 
   // Tiles are always clickable, regardless of flicker mode or SSVEP signal
   // quality: routes through the same backend command_bus / Spotify path a
@@ -121,11 +150,19 @@ export function App() {
         </div>
 
         <main className="app__stage">
-          {layer === "mood" ? (
-            <MoodLayer highlightedTileId={lastFiredTileId} mode={flickerMode} onTileActivate={handleTileActivate} />
-          ) : (
-            <TransportLayer highlightedTileId={lastFiredTileId} mode={flickerMode} onTileActivate={handleTileActivate} />
-          )}
+          <div className={`app__stage-tiles${refractoryDisplay ? " app__stage-tiles--hidden" : ""}`}>
+            {layer === "mood" ? (
+              <MoodLayer highlightedTileId={lastFiredTileId} mode={flickerMode} onTileActivate={handleTileActivate} />
+            ) : (
+              <TransportLayer highlightedTileId={lastFiredTileId} mode={flickerMode} onTileActivate={handleTileActivate} />
+            )}
+          </div>
+          <div
+            className={`app__refractory-overlay${refractoryDisplay ? " app__refractory-overlay--visible" : ""}`}
+            aria-live="polite"
+          >
+            {refractoryLabel && <div className="app__refractory-label">{labelForTileId(refractoryLabel)}</div>}
+          </div>
         </main>
 
         <div className="app__now-playing-bar">

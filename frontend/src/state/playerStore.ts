@@ -5,6 +5,7 @@ export type Layer = "mood" | "transport";
 export type WsStatus = "connecting" | "connected" | "disconnected";
 
 const FLICKER_MODE_STORAGE_KEY = "ssvep-flicker-mode";
+const REFRACTORY_FEEDBACK_STORAGE_KEY = "ssvep-refractory-feedback-enabled";
 
 function loadStoredFlickerMode(): FlickerMode {
   try {
@@ -16,6 +17,16 @@ function loadStoredFlickerMode(): FlickerMode {
     // localStorage unavailable (private browsing, etc.) -- fall through to default.
   }
   return "sine";
+}
+
+function loadStoredRefractoryFeedbackEnabled(): boolean {
+  try {
+    const stored = localStorage.getItem(REFRACTORY_FEEDBACK_STORAGE_KEY);
+    if (stored !== null) return stored === "true";
+  } catch {
+    // localStorage unavailable (private browsing, etc.) -- fall through to default.
+  }
+  return true;
 }
 
 export interface DetectionEvent {
@@ -64,6 +75,10 @@ interface PlayerState {
   nowPlaying: NowPlaying | null;
   measuredRefreshHz: number | null;
   flickerMode: FlickerMode;
+  /** Per-viewer display preference (localStorage, not backend state): while
+   * true, a fired input is shown large and centered -- tiles hidden -- for
+   * the backend's refractory period that follows it. */
+  refractoryFeedbackEnabled: boolean;
   /** Set from a backend {"type":"error"} WS message (e.g. the EEG/LSL stream
    * dropping out mid-session); cleared by the matching {"type":"info"}
    * once it recovers. Null means nothing to warn about. */
@@ -92,6 +107,7 @@ interface PlayerState {
   setNowPlaying: (np: NowPlaying | null) => void;
   setMeasuredRefreshHz: (hz: number) => void;
   setFlickerMode: (mode: FlickerMode) => void;
+  setRefractoryFeedbackEnabled: (enabled: boolean) => void;
   setStreamWarning: (message: string | null) => void;
   addDetectionEvent: (label: string, layer: Layer) => void;
   setDebugPanelOpen: (open: boolean) => void;
@@ -113,6 +129,7 @@ export const usePlayerStore = create<PlayerState>((set) => ({
   nowPlaying: null,
   measuredRefreshHz: null,
   flickerMode: loadStoredFlickerMode(),
+  refractoryFeedbackEnabled: loadStoredRefractoryFeedbackEnabled(),
   streamWarning: null,
   detectionHistory: [],
   debugPanelOpen: false,
@@ -134,6 +151,14 @@ export const usePlayerStore = create<PlayerState>((set) => ({
       // Best-effort persistence only -- a per-viewer convenience, not load-bearing.
     }
     set({ flickerMode: mode });
+  },
+  setRefractoryFeedbackEnabled: (enabled) => {
+    try {
+      localStorage.setItem(REFRACTORY_FEEDBACK_STORAGE_KEY, String(enabled));
+    } catch {
+      // Best-effort persistence only -- a per-viewer convenience, not load-bearing.
+    }
+    set({ refractoryFeedbackEnabled: enabled });
   },
   setStreamWarning: (message) => set({ streamWarning: message }),
   addDetectionEvent: (label, layer) =>
